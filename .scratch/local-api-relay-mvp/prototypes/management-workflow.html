@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local Relay Management Prototype</title>
+  <style>
+    :root {
+      --ink: #17212b;
+      --muted: #66717c;
+      --line: #d9dee4;
+      --soft: #f4f6f7;
+      --paper: #fbfcfc;
+      --blue: #1769aa;
+      --blue-soft: #e7f1f8;
+      --green: #25724b;
+      --green-soft: #e6f4ec;
+      --amber: #9a6414;
+      --amber-soft: #fff2d8;
+      --red: #a33b36;
+      --red-soft: #fbe9e8;
+      --shadow: 0 12px 28px rgba(23, 33, 43, .08);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: #edf0f2;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    .shell { min-height: 100vh; }
+    .topbar { background: #17212b; color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 18px clamp(18px, 4vw, 52px); }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: .01em; }
+    .brand-mark { width: 34px; height: 34px; border: 2px solid #8cc6e7; display: grid; place-items: center; color: #8cc6e7; font-size: 12px; }
+    .topbar small { color: #b9c7d1; }
+    .page { max-width: 1400px; margin: 0 auto; padding: 34px clamp(18px, 4vw, 52px) 110px; }
+    .eyebrow { text-transform: uppercase; letter-spacing: .12em; font-size: 11px; color: var(--muted); font-weight: 700; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { font-size: clamp(27px, 4vw, 42px); line-height: 1.08; margin-bottom: 10px; letter-spacing: 0; }
+    h2 { font-size: 20px; margin-bottom: 6px; letter-spacing: 0; }
+    h3 { font-size: 14px; margin-bottom: 8px; letter-spacing: 0; }
+    .lede { color: var(--muted); max-width: 720px; margin-bottom: 26px; }
+    .button { border: 1px solid var(--line); background: #fff; color: var(--ink); padding: 9px 13px; border-radius: 5px; font-weight: 650; display: inline-flex; gap: 8px; align-items: center; }
+    .button:hover { border-color: var(--blue); color: var(--blue); }
+    .button.primary { border-color: var(--blue); background: var(--blue); color: #fff; }
+    .button.primary:hover { background: #125888; }
+    .button.ghost { background: transparent; }
+    .button.danger { color: var(--red); border-color: #e8c0be; }
+    .button.small { padding: 6px 9px; font-size: 12px; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .stack { display: grid; gap: 18px; }
+    .panel { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow); }
+    .panel-head { padding: 18px 20px; border-bottom: 1px solid var(--line); }
+    .panel-body { padding: 20px; }
+    .stat-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 26px 0; }
+    .stat { background: var(--paper); border: 1px solid var(--line); padding: 16px; border-radius: 5px; }
+    .stat strong { display: block; font-size: 26px; margin: 6px 0 2px; }
+    .stat span { color: var(--muted); font-size: 12px; }
+    .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; }
+    .status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .status.available { color: var(--green); }
+    .status.checking { color: var(--amber); }
+    .status.unavailable { color: var(--red); }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 13px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+    th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+    tr:last-child td { border-bottom: 0; }
+    .mono { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; }
+    .tag { padding: 3px 7px; border: 1px solid var(--line); color: var(--muted); border-radius: 3px; font-size: 11px; }
+    .tag.blue { background: var(--blue-soft); border-color: #b9d7eb; color: var(--blue); }
+    .tag.green { background: var(--green-soft); border-color: #b7dbc6; color: var(--green); }
+    .tag.amber { background: var(--amber-soft); border-color: #eed39e; color: var(--amber); }
+    .tag.red { background: var(--red-soft); border-color: #e8c0be; color: var(--red); }
+    .helper { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .grid-2 { display: grid; grid-template-columns: 1.25fr .75fr; gap: 18px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .check-list { display: grid; gap: 10px; padding: 0; margin: 0; list-style: none; }
+    .check-list li { display: flex; gap: 9px; align-items: flex-start; font-size: 13px; }
+    .check-list li::before { content: "✓"; color: var(--green); font-weight: 800; }
+    .check-list li.warn::before { content: "!"; color: var(--amber); }
+    .route-line { display: grid; grid-template-columns: minmax(130px, 1fr) 105px 110px 120px; gap: 14px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
+    .route-line:last-child { border-bottom: 0; }
+    .route-name strong, .route-name span { display: block; }
+    .route-name span { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .key-list { display: grid; gap: 10px; }
+    .key-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px; border: 1px solid var(--line); background: #fff; }
+    .key-item strong, .key-item span { display: block; }
+    .key-item span { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+    label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 650; }
+    input, select { width: 100%; border: 1px solid var(--line); background: #fff; border-radius: 4px; padding: 9px 10px; color: var(--ink); }
+    input:focus, select:focus { outline: 2px solid #a9d3ed; border-color: var(--blue); }
+    .notice { border-left: 3px solid var(--amber); background: var(--amber-soft); padding: 12px 14px; font-size: 13px; color: #6c4a12; }
+    .sidebar-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 28px; align-items: start; }
+    .side-nav { position: sticky; top: 24px; display: grid; gap: 4px; }
+    .side-nav a { color: var(--muted); text-decoration: none; padding: 10px 12px; border-left: 2px solid transparent; font-size: 13px; }
+    .side-nav a.active { color: var(--ink); border-left-color: var(--blue); background: #fff; font-weight: 700; }
+    .step { display: grid; grid-template-columns: 34px 1fr; gap: 15px; position: relative; }
+    .step:not(:last-child)::after { content: ""; position: absolute; left: 16px; top: 34px; bottom: -20px; width: 1px; background: var(--line); }
+    .step-no { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line); background: #fff; color: var(--muted); font-weight: 700; z-index: 1; }
+    .step.done .step-no { background: var(--green); border-color: var(--green); color: #fff; }
+    .step.active .step-no { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .step-copy { padding-bottom: 32px; }
+    .step-copy h3 { margin: 6px 0; }
+    .matrix { display: grid; grid-template-columns: 210px repeat(3, minmax(175px, 1fr)); overflow-x: auto; }
+    .matrix > div { padding: 15px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); min-height: 100px; }
+    .matrix .head { min-height: auto; background: var(--soft); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+    .matrix .model { background: #fff; font-weight: 700; }
+    .route-card { background: #fff; border: 1px solid var(--line); padding: 11px; display: grid; gap: 8px; }
+    .route-card .row { gap: 8px; }
+    .route-card .price { font-size: 18px; font-weight: 750; }
+    .route-card .price small { color: var(--muted); font-size: 11px; font-weight: 500; }
+    .matrix-key { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 12px; }
+    .matrix-key span { display: inline-flex; gap: 6px; align-items: center; }
+    .switcher { position: fixed; z-index: 10; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; background: #17212b; color: #fff; padding: 8px 11px; border-radius: 7px; box-shadow: 0 14px 30px rgba(0,0,0,.24); }
+    .switcher button { width: 31px; height: 31px; border: 1px solid #52606c; border-radius: 4px; color: #fff; background: #253441; font-size: 18px; line-height: 1; }
+    .switcher button:hover { background: #334957; }
+    .switcher-label { min-width: 160px; text-align: center; font-size: 12px; font-weight: 700; }
+    .toast { position: fixed; top: 76px; right: 22px; padding: 12px 15px; background: #17212b; color: #fff; border-radius: 5px; box-shadow: var(--shadow); font-size: 13px; opacity: 0; pointer-events: none; transform: translateY(-8px); transition: .2s ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    @media (max-width: 900px) { .stat-strip, .grid-3 { grid-template-columns: repeat(2, 1fr); } .grid-2 { grid-template-columns: 1fr; } .sidebar-layout { grid-template-columns: 1fr; } .side-nav { position: static; display: flex; overflow-x: auto; } .side-nav a { white-space: nowrap; border-left: 0; border-bottom: 2px solid transparent; } .side-nav a.active { border-bottom-color: var(--blue); } }
+    @media (max-width: 620px) { .page { padding-top: 24px; } .stat-strip, .grid-3, .form-grid { grid-template-columns: 1fr; } .topbar { align-items: flex-start; gap: 8px; flex-direction: column; } .route-line { grid-template-columns: 1fr 1fr; } .route-line .button { justify-self: start; } .switcher-label { min-width: 130px; } }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="switcher" class="switcher" aria-label="Prototype variants">
+    <button data-dir="prev" aria-label="Previous variant">←</button>
+    <div class="switcher-label"></div>
+    <button data-dir="next" aria-label="Next variant">→</button>
+  </div>
+  <script>
+    // Throwaway UI prototype: three structurally different management workflows, switchable via ?variant=A|B|C.
+    const variants = [
+      { key: 'A', name: 'Operations console', render: renderOperations },
+      { key: 'B', name: 'Guided setup', render: renderGuided },
+      { key: 'C', name: 'Model matrix', render: renderMatrix }
+    ];
+    const sample = {
+      providers: [
+        { name: 'OpenAI primary', url: 'api.openai.com', models: 3, state: 'available' },
+        { name: 'OpenRouter value', url: 'openrouter.ai', models: 7, state: 'available' },
+        { name: 'Office gateway', url: 'relay.internal', models: 2, state: 'checking' }
+      ],
+      routes: [
+        { provider: 'OpenRouter value', model: 'gpt-4o-mini', protocol: 'Chat', cost: '0.72x', state: 'available', check: '38s ago' },
+        { provider: 'OpenAI primary', model: 'gpt-4o-mini', protocol: 'Chat', cost: '1.00x', state: 'available', check: '41s ago' },
+        { provider: 'Office gateway', model: 'gpt-4o-mini', protocol: 'Chat', cost: '0.86x', state: 'unavailable', check: '2m ago' }
+      ],
+      keys: [
+        { label: 'codex-local', prefix: 'lrk_7f2a…91c', models: 'gpt-4o, gpt-4o-mini' },
+        { label: 'review-agent', prefix: 'lrk_3ac1…02e', models: 'gpt-4o-mini' }
+      ]
+    };
+    function status(state) { const labels = { available: 'Available', checking: 'Checking', unavailable: 'Temporarily unavailable' }; return `<span class="status ${state}">${labels[state]}</span>`; }
+    function action(label) { return `<button class="button small" data-action="${label}">${label}</button>`; }
+    function page(title, subtitle, body) { return `<div class="shell"><header class="topbar"><div class="brand"><span class="brand-mark">LR</span><span>Local Relay</span></div><small>127.0.0.1 · Administrator</small></header><main class="page"><div class="eyebrow">Management prototype</div><h1>${title}</h1><p class="lede">${subtitle}</p>${body}</main></div>`; }
+    function renderOperations() {
+      return page('Keep the relay healthy', 'A dense daily view for checking upstreams, correcting routes, and controlling which callers can use each published model.', `
+        <div class="row"><div></div><div>${action('+ Add upstream provider')} ${action('+ Publish model')}</div></div>
+        <div class="stat-strip"><div class="stat"><span>Published models</span><strong>4</strong><span>all have a route</span></div><div class="stat"><span>Available routes</span><strong>8/10</strong><span>2 recovering</span></div><div class="stat"><span>Relay access keys</span><strong>2</strong><span>last used 4m ago</span></div><div class="stat"><span>Loopback API</span><strong class="mono">:4100</strong><span>ready</span></div></div>
+        <div class="grid-2"><section class="panel"><div class="panel-head row"><div><h2>Upstream providers</h2><p class="helper">Connections are independent even when their base URLs match.</p></div>${action('Manage providers')}</div><div class="panel-body table-wrap"><table><thead><tr><th>Connection</th><th>Models</th><th>State</th><th></th></tr></thead><tbody>${sample.providers.map(p => `<tr><td><strong>${p.name}</strong><div class="helper mono">${p.url}</div></td><td>${p.models}</td><td>${status(p.state)}</td><td>${action('Edit')}</td></tr>`).join('')}</tbody></table></div></section>
+          <section class="panel"><div class="panel-head row"><div><h2>Relay access keys</h2><p class="helper">Keys only grant selected route sets, never admin access.</p></div>${action('+ Create key')}</div><div class="panel-body key-list">${sample.keys.map(k => `<div class="key-item"><div><strong>${k.label}</strong><span class="mono">${k.prefix}</span><span>Models: ${k.models}</span></div>${action('Revoke')}</div>`).join('')}</div></section></div>
+        <section class="panel" style="margin-top:18px"><div class="panel-head row"><div><h2>Model routes</h2><p class="helper">Routes are ordered by cost multiplier, then filtered by health and key eligibility.</p></div>${action('Inspect health')}</div><div class="panel-body">${sample.routes.map(r => `<div class="route-line"><div class="route-name"><strong>${r.model}</strong><span>${r.provider} · ${r.protocol} Completions</span></div><div><span class="tag blue">${r.cost}</span></div><div>${status(r.state)}<div class="helper">${r.check}</div></div><div>${r.state === 'unavailable' ? action('Probe now') : action('Edit route')}</div></div>`).join('')}</div></section>`);
+    }
+    function renderGuided() {
+      return page('Configure one usable model', 'A linear setup path that makes invalid configuration visible before the relay is asked to serve traffic.', `
+        <div class="sidebar-layout"><nav class="side-nav"><a class="active" href="#setup">Setup checklist</a><a href="#providers">Providers</a><a href="#models">Published models</a><a href="#keys">Access keys</a><a href="#health">Health</a></nav><div class="stack" id="setup">
+          <section class="panel"><div class="panel-head"><div class="eyebrow">Step 3 of 5</div><h2>Map a published model</h2><p class="helper">Every route needs an explicit upstream model and native protocol.</p></div><div class="panel-body stack"><div class="step done"><div class="step-no">1</div><div class="step-copy"><h3>Add an upstream provider</h3><p class="helper">OpenRouter value · <span class="mono">https://openrouter.ai/api</span></p></div></div><div class="step done"><div class="step-no">2</div><div class="step-copy"><h3>Select supported models</h3><p class="helper">Found 7 models. 3 selected for publication.</p></div></div><div class="step active"><div class="step-no">3</div><div class="step-copy"><h3>Map and price the route</h3><div class="form-grid"><label>Published model<input value="gpt-4o-mini" /></label><label>Upstream model<input value="openai/gpt-4o-mini" /></label><label>Protocol<select><option>Chat Completions</option><option>Responses</option></select></label><label>Cost multiplier<input value="0.72" /></label></div><div class="notice" style="margin-top:14px">This route is unavailable until its startup or recovery check succeeds. It will not receive client traffic.</div></div></div><div class="step"><div class="step-no">4</div><div class="step-copy"><h3>Choose route access</h3><p class="helper">Assign this route to one or more relay access keys.</p></div></div><div class="step"><div class="step-no">5</div><div class="step-copy"><h3>Review and enable</h3><p class="helper">The relay refuses incomplete mappings before serving requests.</p></div></div><div class="row"><button class="button ghost" data-action="Back">Back</button><button class="button primary" data-action="Validate route">Validate route →</button></div></div></section>
+          <section class="panel" id="keys"><div class="panel-head row"><div><h2>Access for this model</h2><p class="helper">A key can be scoped to a subset of routes under the same published model.</p></div>${action('+ Create access key')}</div><div class="panel-body"><table><thead><tr><th>Key</th><th>Published model</th><th>Eligible routes</th><th></th></tr></thead><tbody><tr><td><strong>codex-local</strong><div class="helper mono">lrk_7f2a…91c</div></td><td>gpt-4o-mini</td><td><label><input type="checkbox" checked> OpenRouter value · 0.72x</label><label><input type="checkbox"> OpenAI primary · 1.00x</label></td><td>${action('Save access')}</td></tr></tbody></table></div></section>
+        </div></div>`);
+    }
+    function renderMatrix() {
+      return page('See every published model at a glance', 'A model-first matrix makes identity, route cost, health, and caller eligibility comparable without opening provider-specific screens.', `
+        <div class="row"><div class="notice" style="flex:1">2 routes need attention. The cheapest healthy route stays first; identity never crosses rows.</div><div>${action('+ Add route')}</div></div>
+        <section class="panel" style="margin-top:18px"><div class="panel-head row"><div><h2>Published model matrix</h2><p class="helper">Select a cell to edit its explicit mapping, cost multiplier, or key eligibility.</p></div><select style="max-width:180px"><option>All protocols</option><option>Chat Completions</option><option>Responses</option></select></div><div class="panel-body"><div class="matrix"><div class="head">Published model</div><div class="head">OpenRouter value</div><div class="head">OpenAI primary</div><div class="head">Office gateway</div><div class="model"><strong>gpt-4o-mini</strong><p class="helper">2 access keys</p></div><div><div class="route-card"><div class="row"><span class="tag blue">Chat</span>${status('available')}</div><div class="mono">openai/gpt-4o-mini</div><div class="price">0.72x <small>multiplier</small></div><div class="helper">codex-local · review-agent</div>${action('Edit route')}</div></div><div><div class="route-card"><div class="row"><span class="tag blue">Chat</span>${status('available')}</div><div class="mono">gpt-4o-mini</div><div class="price">1.00x <small>multiplier</small></div><div class="helper">codex-local</div>${action('Edit route')}</div></div><div><div class="route-card"><div class="row"><span class="tag blue">Chat</span>${status('unavailable')}</div><div class="mono">gpt-4o-mini</div><div class="price">0.86x <small>multiplier</small></div><div class="helper">No eligible keys</div>${action('Probe now')}</div></div><div class="model"><strong>gpt-4o</strong><p class="helper">1 access key</p></div><div><div class="route-card"><div class="row"><span class="tag blue">Responses</span>${status('available')}</div><div class="mono">openai/gpt-4o</div><div class="price">0.95x <small>multiplier</small></div><div class="helper">codex-local</div>${action('Edit route')}</div></div><div><div class="route-card"><div class="row"><span class="tag blue">Responses</span>${status('checking')}</div><div class="mono">gpt-4o</div><div class="price">1.00x <small>multiplier</small></div><div class="helper">Pending startup check</div>${action('View details')}</div></div><div class="helper">No route configured</div></div><div class="matrix-key"><span>${status('available')} serving traffic</span><span>${status('checking')} startup check</span><span>${status('unavailable')} excluded from Fallback</span></div></div></section>`);
+    }
+    function currentIndex() { const key = new URLSearchParams(location.search).get('variant') || 'A'; const index = variants.findIndex(v => v.key === key.toUpperCase()); return index < 0 ? 0 : index; }
+    function setVariant(index) { const v = variants[(index + variants.length) % variants.length]; const url = new URL(location.href); url.searchParams.set('variant', v.key); history.replaceState({}, '', url); mount(); }
+    function mount() { const index = currentIndex(); variants[index].render && (document.getElementById('app').innerHTML = variants[index].render()); document.querySelector('.switcher-label').textContent = `${variants[index].key} — ${variants[index].name}`; }
+    document.getElementById('switcher').addEventListener('click', e => { const button = e.target.closest('button'); if (!button) return; setVariant(currentIndex() + (button.dataset.dir === 'next' ? 1 : -1)); });
+    document.addEventListener('keydown', e => { if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) return; if (e.key === 'ArrowLeft') setVariant(currentIndex() - 1); if (e.key === 'ArrowRight') setVariant(currentIndex() + 1); });
+    document.addEventListener('click', e => { const button = e.target.closest('[data-action]'); if (!button) return; const toast = document.getElementById('toast'); toast.textContent = `${button.dataset.action}: prototype action only`; toast.classList.add('show'); clearTimeout(window.toastTimer); window.toastTimer = setTimeout(() => toast.classList.remove('show'), 1800); });
+    mount();
+  </script>
+</body>
+</html>

@@ -1,0 +1,411 @@
+#!/usr/bin/env bash
+# local-api-relay-service — fixed, scriptable lifecycle commands for the
+# installed loopback relay (PKG-007).
+#
+#   local-api-relay-service start     start the service (idempotent; waits for ready)
+#   local-api-relay-service stop      graceful stop (bounded drain, PKG-012)
+#   local-api-relay-service restart   stop then start
+#   local-api-relay-service status    report state; exit 0 running / 3 stopped
+#   local-api-relay-service rollback  switch back to the previous version (PKG-014)
+#   (a relay started directly by the Windows login task is recognized by
+#   probing the configured loopback port, since that path leaves no pidfile)
+#
+# The browser never manages the process lifecycle and no arbitrary shell hook
+# is configurable: these commands are the only lifecycle interface (PKG-007).
+#
+# The launcher captures the serve process's structured stderr into the state
+# log directory and rotates the captured file at the earlier of the 20 MiB size
+# bound or the calendar-day boundary, keeping nothing older than 14 days and
+# capping the captured set at 200 MiB, oldest first (OPS-017/OPS-019). The
+# serve process itself mirrors every event into its own live-managed rotating
+# log under the same directory. No secret — including the administrator
+# bootstrap credential — is ever written to a script, the environment, or the
+# logs (SEC-005).
+#
+# Exit codes: 0 success / running, 1 not ready or start failure, 2 usage,
+# 3 not running (status convention).
+set -u
+
+readonly APP_NAME="local-api-relay"
+
+home_dir="${HOME:-}"
+if [ -z "$home_dir" ]; then
+    echo "local-api-relay-service: HOME is required" >&2
+    exit 1
+fi
+
+data_home="${XDG_DATA_HOME:-$home_dir/.local/share}/$APP_NAME"
+config_home="${XDG_CONFIG_HOME:-$home_dir/.config}/$APP_NAME"
+state_home="${XDG_STATE_HOME:-$home_dir/.local/state}/$APP_NAME"
+log_dir="$state_home/logs"
+pidfile="$state_home/service.pid"
+captured_log="$log_dir/serve.log"
+
+install_root="$home_dir/.local"
+bin_dir="$install_root/bin"
+entry="$bin_dir/$APP_NAME"
+windows_task_name="${LOCAL_API_RELAY_WINDOWS_TASK_NAME:-$APP_NAME}"
+
+# The explicit process configuration chooses another stable port; without it
+# the service binds the stable default (PKG-009).
+port="8787"
+if [ -f "$config_home/service.json" ]; then
+    configured_port=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$config_home/service.json" | head -n 1)
+    if [ -n "$configured_port" ]; then
+        port="$configured_port"
+    fi
+fi
+
+# Launcher rotation bounds (OPS-019), shrinkable for process-boundary tests.
+size_limit_bytes=20971520          # 20 MiB
+total_cap_bytes=209715200          # 200 MiB
+retention_days=14
+if [ -n "${LOCAL_API_RELAY_SERVICE_LOG_SIZE_LIMIT:-}" ]; then
+    size_limit_bytes=$LOCAL_API_RELAY_SERVICE_LOG_SIZE_LIMIT
+fi
+if [ -n "${LOCAL_API_RELAY_SERVICE_LOG_SIZE_CAP:-}" ]; then
+    total_cap_bytes=$LOCAL_API_RELAY_SERVICE_LOG_SIZE_CAP
+fi
+
+pid_alive() {
+    kill -0 "$1" 2>/dev/null
+}
+
+# Probes the dedicated local ready endpoint through bash's /dev/tcp so no
+# external HTTP client is required. Returns 0 when the service answers ready
+# within the timeout, 1 otherwise.
+ready_ok() {
+    local port="$1"
+    local timeout_ms="$2"
+    local deadline_ms
+    deadline_ms=$(( $(date +%s%N 2>/dev/null) / 1000000 + timeout_ms ))
+    while :; do
+        if { exec 9<>"/dev/tcp/127.0.0.1/$port"; } 2>/dev/null; then
+            printf 'GET /ready HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n' >&9
+            local first_line=""
+            IFS= read -r -t 2 first_line <&9 || true
+            # Close the probe descriptor in a subshell so this shell's own
+            # stderr is not permanently redirected by a bare `exec` form.
+            (exec 9<&- 9>&-) 2>/dev/null || true
+            # The ready contract is exactly HTTP 200 (PKG-010), the same strict
+            # match the single-shot probes use; a proxy page or partial reply
+            # is not ready.
+            set -- $first_line
+            if [ "${2:-}" = "200" ]; then
+                return 0
+            fi
+        fi
+        now_ms=$(date +%s%N 2>/dev/null)
+        now_ms=${now_ms%??????} # nanoseconds to milliseconds
+        [ "${now_ms:-0}" -ge "$deadline_ms" ] && return 1
+        sleep 0.2
+    done
+}
+
+ensure_dirs() {
+    mkdir -p "$data_home" "$config_home" "$state_home" "$log_dir" 2>/dev/null
+    chmod 700 "$data_home" "$config_home" "$state_home" "$log_dir" 2>/dev/null || true
+}
+
+# The next unused rotated name for a day: serve.log.<day>, then .<day>.1 ...
+rotated_name() {
+    local day="$1"
+    local candidate="$log_dir/serve.log.$day"
+    local index=1
+    while [ -e "$candidate" ]; do
+        candidate="$log_dir/serve.log.$day.$index"
+        index=$((index + 1))
+    done
+    printf '%s' "$candidate"
+}
+
+# Rotates the captured launcher stderr at the earlier of the size bound or the
+# calendar-day boundary, then enforces retention and the total cap. Rotation
+# runs at start (stale capture from a crashed run) and at stop, after the serve
+# process has exited and its file descriptor is closed, so renaming the active
+# capture is always safe.
+rotate_captured_log() {
+    local day file_day size
+    day=$(date -u +%Y-%m-%d)
+    if [ -f "$captured_log" ]; then
+        size=$(stat -c%s "$captured_log" 2>/dev/null || echo 0)
+        file_day=$(date -u -r "$captured_log" +%Y-%m-%d 2>/dev/null || echo "$day")
+        if [ "$size" -gt "$size_limit_bytes" ] || [ "$file_day" != "$day" ]; then
+            mv "$captured_log" "$(rotated_name "$file_day")"
+        fi
+    fi
+    prune_captured_logs
+}
+
+prune_captured_logs() {
+    local now
+    now=$(date -u +%s)
+
+    # Nothing older than the retention window survives.
+    local entry name day file_epoch
+    for entry in "$log_dir"/serve.log.[0-9]*; do
+        [ -f "$entry" ] || continue
+        name=$(basename "$entry")
+        day=${name#serve.log.}
+        day=${day%%\.*}
+        file_epoch=$(date -u -d "$day" +%s 2>/dev/null) || continue
+        # Strict 14-day retention: a file older than 14 * 86400 seconds is
+        # deleted, so nothing survives into its fifteenth day (OPS-019).
+        if [ $((now - file_epoch)) -gt $((retention_days * 86400)) ]; then
+            rm -f "$entry"
+        fi
+    done
+
+    # The captured set (including the active file) stays under the total cap,
+    # deleting the oldest rotated file first; the active file itself is never
+    # deleted (it is bounded by the rotation limit at every boundary).
+    local total=0 size
+    if [ -f "$captured_log" ]; then
+        size=$(stat -c%s "$captured_log" 2>/dev/null || echo 0)
+        total=$((total + size))
+    fi
+    for entry in "$log_dir"/serve.log.[0-9]*; do
+        [ -f "$entry" ] || continue
+        size=$(stat -c%s "$entry" 2>/dev/null || echo 0)
+        total=$((total + size))
+    done
+    for entry in $(ls -1 "$log_dir"/serve.log.[0-9]* 2>/dev/null | sort); do
+        [ -f "$entry" ] || continue
+        [ "$total" -le "$total_cap_bytes" ] && break
+        size=$(stat -c%s "$entry" 2>/dev/null || echo 0)
+        rm -f "$entry"
+        total=$((total - size))
+    done
+}
+
+# A single-shot ready probe: returns 0 exactly when the relay answers HTTP
+# 200 on the configured port, without waiting. Used to recognize a relay
+# started directly by the Windows login task, which leaves no pidfile
+# (ticket 30). This is the same probe the generated launcher embeds and must
+# stay in sync with it.
+serving_now() {
+    { exec 9<>"/dev/tcp/127.0.0.1/$port"; } 2>/dev/null || return 1
+    printf 'GET /ready HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n' >&9
+    local first_line=""
+    IFS= read -r -t 2 first_line <&9 || true
+    # Close the probe descriptor in a subshell so this shell's own stderr is
+    # not permanently redirected by a bare `exec` form.
+    (exec 9<&- 9>&-) 2>/dev/null || true
+    set -- $first_line
+    [ "${2:-}" = "200" ]
+}
+
+# Waits until the configured port stops answering ready, bounded.
+wait_not_serving() {
+    local timeout_ms="$1" now_ms deadline_ms
+    deadline_ms=$(( $(date +%s%N 2>/dev/null) / 1000000 + timeout_ms ))
+    while :; do
+        if ! serving_now; then
+            return 0
+        fi
+        now_ms=$(date +%s%N 2>/dev/null)
+        now_ms=${now_ms%??????}
+        [ "${now_ms:-0}" -ge "$deadline_ms" ] && return 1
+        sleep 0.2
+    done
+}
+
+# Whether the per-user Windows login task is registered; the rollback stops and
+# restarts through the same holder that owns the running serve (ticket 30).
+task_registered() {
+    [ "${LOCAL_API_RELAY_WINDOWS_TASK_SKIP:-}" = "1" ] && return 1
+    command -v schtasks.exe >/dev/null 2>&1 || return 1
+    schtasks.exe /Query /TN "$windows_task_name" >/dev/null 2>&1
+}
+
+start() {
+    ensure_dirs
+    # Idempotent: a live process — even one still coming up — is already
+    # "started"; starting another copy would only fail to bind the port.
+    if [ -f "$pidfile" ] && pid_alive "$(cat "$pidfile")"; then
+        if ready_ok "$port" 2000; then
+            echo "local-api-relay: already running on 127.0.0.1:$port (pid $(cat "$pidfile"))"
+        else
+            echo "local-api-relay: already starting on 127.0.0.1:$port (pid $(cat "$pidfile"))"
+        fi
+        exit 0
+    fi
+    rm -f "$pidfile"
+    rotate_captured_log
+    if [ ! -x "$entry" ]; then
+        echo "local-api-relay: stable entry $entry is missing; reinstall the archive" >&2
+        exit 1
+    fi
+    # The captured stderr is a state artifact: owner-only (PKG-004).
+    touch "$captured_log" 2>/dev/null || true
+    chmod 600 "$captured_log" 2>/dev/null || true
+    nohup "$entry" serve >>"$captured_log" 2>&1 &
+    local pid=$!
+    printf '%s\n' "$pid" >"$pidfile"
+    chmod 600 "$pidfile" 2>/dev/null || true
+    if ready_ok "$port" 15000; then
+        echo "local-api-relay: started (pid $pid) on 127.0.0.1:$port"
+        exit 0
+    fi
+    echo "local-api-relay: process started but did not become ready on 127.0.0.1:$port" >&2
+    echo "local-api-relay: inspect $captured_log and run: local-api-relay-service status" >&2
+    exit 1
+}
+
+stop() {
+    if [ ! -f "$pidfile" ] || ! pid_alive "$(cat "$pidfile")"; then
+        rm -f "$pidfile"
+        rotate_captured_log
+        echo "local-api-relay: not running"
+        return 0
+    fi
+    local pid
+    pid=$(cat "$pidfile")
+    # SIGTERM triggers the bounded graceful drain inside the service (PKG-012).
+    kill -TERM "$pid" 2>/dev/null || true
+    local deadline=$(( $(date +%s) + 35 ))
+    while pid_alive "$pid" && [ "$(date +%s)" -lt "$deadline" ]; do
+        sleep 0.25
+    done
+    if pid_alive "$pid"; then
+        kill -KILL "$pid" 2>/dev/null || true
+        echo "local-api-relay: stopped (forced after the drain window)"
+    else
+        echo "local-api-relay: stopped"
+    fi
+    rm -f "$pidfile"
+    # The serve process has exited, so its capture descriptor is closed and the
+    # captured stderr can rotate safely at the size/day boundaries.
+    rotate_captured_log
+    return 0
+}
+
+status() {
+    if [ -f "$pidfile" ] && pid_alive "$(cat "$pidfile")"; then
+        local pid
+        pid=$(cat "$pidfile")
+        if ready_ok "$port" 2000; then
+            echo "local-api-relay: running on 127.0.0.1:$port (pid $pid)"
+            exit 0
+        fi
+        echo "local-api-relay: starting on 127.0.0.1:$port (pid $pid)"
+        exit 1
+    fi
+    rm -f "$pidfile"
+    # The Windows login task starts serve directly without a pidfile (ticket
+    # 30); a relay answering /ready on the configured port is running even
+    # though no script-managed pid exists. Single-shot probe so a stopped
+    # status stays instant.
+    if serving_now; then
+        echo "local-api-relay: running on 127.0.0.1:$port (login task)"
+        exit 0
+    fi
+    echo "local-api-relay: stopped"
+    exit 3
+}
+
+# Reverses the most recent upgrade (PKG-014). Reads the upgrade state written
+# by install.sh, stops the service, and switches the stable entry back to the
+# previous program version (which is always kept side by side). When the live
+# database is newer than the previous version supports, the forward migration
+# committed during the failed upgrade; the rollback then explicitly restores
+# the pre-migration backup with the previous binary — the live database is
+# never downgraded in place. A failed upgrade that never committed a migration
+# needs no restore at all, because the live database was left untouched.
+rollback() {
+    local state_file="$state_home/upgrade.state"
+    if [ ! -f "$state_file" ]; then
+        echo "local-api-relay: no upgrade state to roll back; nothing was switched" >&2
+        exit 1
+    fi
+    local previous_version pre_backup
+    previous_version=$(sed -n 's/^previous_version=//p' "$state_file" | head -n 1)
+    pre_backup=$(sed -n 's/^pre_backup=//p' "$state_file" | head -n 1)
+    if [ -z "$previous_version" ]; then
+        echo "local-api-relay: the upgrade state is invalid (missing previous_version)" >&2
+        exit 1
+    fi
+    local previous_binary="$install_root/opt/$APP_NAME/$previous_version/bin/$APP_NAME"
+    if [ ! -x "$previous_binary" ]; then
+        echo "local-api-relay: the previous version $previous_version binary is missing at $previous_binary" >&2
+        echo "local-api-relay: install the $previous_version archive again, or fix the upgrade state at $state_file" >&2
+        exit 1
+    fi
+
+    # Only a service that is actually serving needs to be stopped and restarted.
+    local was_serving=false
+    if serving_now; then
+        was_serving=true
+    fi
+    if [ "$was_serving" = "true" ]; then
+        # A task-managed serve has no pidfile: end the task when it exists, and
+        # run the graceful pidfile stop for a lifecycle-managed serve.
+        if task_registered; then
+            schtasks.exe /End /TN "$windows_task_name" >/dev/null 2>&1 || true
+        fi
+        stop
+        wait_not_serving 5000 || true
+    fi
+
+    # Probe the live database with the previous binary. A live schema newer
+    # than the previous version supports means the forward migration committed
+    # during the failed upgrade; the rollback then explicitly restores the
+    # pre-migration backup with the previous binary (PKG-014).
+    local check_out supported_schema database_schema
+    check_out=$("$previous_binary" check 2>&1) || true
+    supported_schema=$(printf '%s\n' "$check_out" | sed -n 's/^supported_schema=//p' | head -n 1)
+    database_schema=$(printf '%s\n' "$check_out" | sed -n 's/^database_schema=//p' | head -n 1)
+    if [ -z "$supported_schema" ] && [ -z "$database_schema" ]; then
+        echo "local-api-relay: could not inspect the live database with the previous binary" >&2
+        printf '%s\n' "$check_out" | sed 's/^/local-api-relay:   /' >&2
+        exit 1
+    fi
+    if [ -n "$database_schema" ] && [ "$database_schema" != "none" ] \
+        && [ -n "$supported_schema" ] && [ "$database_schema" -gt "$supported_schema" ]; then
+        if [ -z "$pre_backup" ]; then
+            echo "local-api-relay: rollback needs the pre-migration backup, but the upgrade state records none" >&2
+            echo "local-api-relay: restore a verified backup from the management surface, then run rollback again" >&2
+            exit 1
+        fi
+        echo "local-api-relay: live database schema $database_schema is newer than $previous_version supports ($supported_schema)"
+        echo "local-api-relay: restoring the pre-migration backup $pre_backup"
+        if ! "$previous_binary" restore "$pre_backup"; then
+            echo "local-api-relay: error: the pre-migration backup restore failed; the database was not changed" >&2
+            exit 1
+        fi
+    fi
+
+    # Switch the stable entry back atomically, then drop the consumed state.
+    local tmp_link="$bin_dir/.$APP_NAME.tmp.$$"
+    ln -sfn "$previous_binary" "$tmp_link"
+    mv -f "$tmp_link" "$entry"
+    rm -f "$state_file"
+
+    if [ "$was_serving" = "true" ]; then
+        # Restart through the same holder that owned the service.
+        if task_registered; then
+            schtasks.exe /Run /TN "$windows_task_name" >/dev/null 2>&1 || true
+        else
+            start
+        fi
+        if ! ready_ok "$port" 20000; then
+            echo "local-api-relay: rolled back the entry to $previous_version but the service is not ready" >&2
+            echo "local-api-relay: inspect $captured_log and run: local-api-relay-service status" >&2
+            exit 1
+        fi
+    fi
+    echo "local-api-relay: rolled back to $previous_version"
+}
+
+command="${1:-}"
+case "$command" in
+    start) start ;;
+    stop) stop ;;
+    restart) stop; start ;;
+    status) status ;;
+    rollback) rollback ;;
+    *)
+        echo "usage: local-api-relay-service {start|stop|restart|status|rollback}" >&2
+        exit 2
+        ;;
+esac

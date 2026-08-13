@@ -1,0 +1,9 @@
+{
+  "name": "local-api-relay-browser-harness",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Playwright driver for the Local API Relay management surface acceptance tests (ticket 49). Test-only tooling: production never depends on Node.js.",
+  "dependencies": {
+    "playwright": "1.49.1"
+  }
+}

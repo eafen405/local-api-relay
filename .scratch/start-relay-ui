@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# start-relay-ui — one-click entry: ensure the local relay is running, then
+# open the default browser on the management page for configuration.
+#
+# Personal-use convenience wrapper over the installed lifecycle script and the
+# desktop launcher (PKG-007/008): `local-api-relay-service start` is idempotent
+# (starts the service when it is not running; the Windows login task already
+# handles boot-time startup), and `local-api-relay-launcher` opens the browser
+# once the relay is ready.
+set -u
+
+service_script="${HOME}/.local/bin/local-api-relay-service"
+launcher="${HOME}/.local/bin/local-api-relay-launcher"
+
+if [ ! -x "$service_script" ] || [ ! -x "$launcher" ]; then
+    echo "start-relay-ui: local-api-relay is not installed (missing $service_script or $launcher)" >&2
+    exit 1
+fi
+
+"$service_script" start || { echo "start-relay-ui: the service did not start; run '$service_script status' to diagnose" >&2; exit 1; }
+"$launcher"

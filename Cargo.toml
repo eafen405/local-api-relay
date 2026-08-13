@@ -1,0 +1,29 @@
+[package]
+name = "local-api-relay"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "A loopback-only local API relay"
+
+[[bin]]
+name = "local-api-relay"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+argon2 = "0.5"
+axum = { version = "0.7", features = ["json"] }
+base64 = "0.22"
+clap = { version = "4.5", features = ["derive"] }
+futures-util = "0.3"
+libc = "0.2"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+sha2 = "0.10"
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "net", "signal", "time", "process"] }
+
+[dev-dependencies]
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
