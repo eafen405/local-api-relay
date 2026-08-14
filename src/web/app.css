@@ -76,6 +76,12 @@ input, select { border: 1px solid #a9b8b7; border-radius: 4px; min-height: 40px;
 
 .table-region { border-top: 1px solid #c8d2d0; }
 .table-heading { align-items: center; display: flex; justify-content: space-between; padding: 16px 0; }
+.collapse-toggle { align-items: center; background: transparent; border: 0; border-radius: 4px; color: #607176; cursor: pointer; display: inline-flex; flex: none; font-size: 14px; height: 26px; justify-content: center; line-height: 1; margin-right: 6px; padding: 0; width: 26px; }
+.collapse-toggle:hover { background: #e4eeec; color: #23615b; }
+.collapse-chevron { display: inline-block; transition: transform .15s ease; }
+.collapse-toggle[aria-expanded="false"] .collapse-chevron { transform: rotate(-90deg); }
+.table-heading-title { margin-right: auto; }
+[data-collapse-section].collapsed > .collapse-body { display: none; }
 .empty { border: 1px dashed #a9b8b7; padding: 36px 24px; text-align: center; }
 .empty p { margin: 0 auto; max-width: 500px; }
 .onboarding { border-top: 3px solid #23615b; background: #edf3f2; margin-bottom: 28px; padding: 22px; }

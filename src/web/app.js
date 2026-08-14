@@ -98,6 +98,19 @@ function shellMarkup(view) {
   return `<section class="shell"><header class="topbar"><div class="topbar-inner"><span class="brand">Local API Relay</span><nav class="navigation" aria-label="主导航"><button class="nav" data-view="operations" aria-current="${view === "operations" ? "page" : "false"}">操作台</button><button class="nav" data-view="usage" aria-current="${view === "usage" ? "page" : "false"}">调用与用量</button></nav><button class="secondary account-action" id="sign-out">退出登录</button></div></header><main class="content" id="content"></main></section>`;
 }
 
+// UI-010: collapsible sections keep the Operations page scannable. The
+// open/collapsed set is in-memory per page load; the 5s poll re-renders
+// sections from it, so a user's collapse survives every refresh.
+const COLLAPSED_SECTIONS = new Set();
+
+function collapseToggle(id, label) {
+  const collapsed = COLLAPSED_SECTIONS.has(id);
+  return `<button type="button" class="collapse-toggle" data-collapse-toggle="${escapeHtml(id)}" aria-expanded="${collapsed ? "false" : "true"}" title="${collapsed ? "展开" : "折叠"}${label ? ` ${escapeHtml(label)}` : ""}"><span class="collapse-chevron" aria-hidden="true">▾</span></button>`;
+}
+
+function collapseClass(id) {
+  return COLLAPSED_SECTIONS.has(id) ? " collapsed" : "";
+}
 function statusCard(title, value, warning = false) {
   return `<article class="status${warning ? " warning" : ""}"><h3>${title}</h3><p class="value">${escapeHtml(value)}</p></article>`;
 }
@@ -111,12 +124,12 @@ function catalogMarkup(catalog) {
   const table = catalog.length
     ? `<div class="data-table catalog-table"><div class="table-head"><span>模型</span><span>输入</span><span>输出</span><span>缓存输入</span><span></span></div>${rows}</div>`
     : `<div class="empty"><h2>尚未发布任何模型</h2><p>从上方发布新模型，或从上游模型清单一键发布。</p></div>`;
-  return `<div class="table-heading"><div><h2>发布模型目录</h2><p class="muted">每百万 token 价格（RMB）</p></div><button class="secondary" data-open-panel="catalog">发布新模型</button></div>${table}`;
+  return `<div class="table-heading">${collapseToggle("catalog", "发布模型目录")}<div class="table-heading-title"><h2>发布模型目录</h2><p class="muted">每百万 token 价格（RMB）</p></div><button class="secondary" data-open-panel="catalog">发布新模型</button></div><div class="collapse-body">${table}</div>`;
 }
 
 function providersMarkup(providers) {
   const rows = providers.length ? providers.map((provider) => `<div class="provider-row"><div><strong>${escapeHtml(provider.display_name)}</strong><span>API 密钥 ${escapeHtml(provider.api_key_masked)}</span></div><button class="secondary compact" data-edit-provider="${escapeHtml(provider.id)}">编辑</button></div>`).join("") : `<p class="muted">尚未配置上游供应商。</p>`;
-  return `<div class="table-heading"><h2>上游供应商</h2><button class="secondary" data-open-panel="provider">添加供应商</button></div><div class="provider-list">${rows}</div>`;
+  return `<div class="table-heading">${collapseToggle("providers", "上游供应商")}<h2 class="table-heading-title">上游供应商</h2><button class="secondary" data-open-panel="provider">添加供应商</button></div><div class="collapse-body"><div class="provider-list">${rows}</div></div>`;
 }
 
 // REL-007: the upstream-model list shows each provider cached model catalog
@@ -130,7 +143,7 @@ function upstreamModelsMarkup(state) {
   const catalogNames = new Set((state.catalog || []).map((model) => model.name));
   const feedback = `<p class="check-feedback" id="upstream-model-feedback" role="status"></p>`;
   if (!providers.length) {
-    return `${feedback}<div class="table-heading"><div><h2>上游模型</h2><p class="muted">添加供应商并获取其模型清单后，可一键发布到目录</p></div></div><p class="muted">尚未配置上游供应商。</p>`;
+    return `${feedback}<div class="table-heading">${collapseToggle("upstream-models", "上游模型")}<div class="table-heading-title"><h2>上游模型</h2><p class="muted">添加供应商并获取其模型清单后，可一键发布到目录</p></div></div><div class="collapse-body"><p class="muted">尚未配置上游供应商。</p></div>`;
   }
   const rows = providers.map((provider) => {
     const models = provider.cached_models || [];
@@ -143,7 +156,7 @@ function upstreamModelsMarkup(state) {
     const body = models.length ? `<ul class="upstream-model-list">${items}</ul>` : `<p class="muted">尚未获取此供应商的模型清单。</p>`;
     return `<div class="provider-models"><div class="provider-models-head"><strong>${escapeHtml(provider.display_name)}</strong><button class="secondary compact" data-refresh-provider-models="${escapeHtml(provider.id)}">刷新模型</button></div>${body}</div>`;
   }).join("");
-  return `${feedback}<div class="table-heading"><div><h2>上游模型</h2><p class="muted">尚未发布到目录的模型可一键发布</p></div></div>${rows}`;
+  return `${feedback}<div class="table-heading">${collapseToggle("upstream-models", "上游模型")}<div class="table-heading-title"><h2>上游模型</h2><p class="muted">尚未发布到目录的模型可一键发布</p></div></div><div class="collapse-body">${rows}</div>`;
 }
 
 function routesMarkup(routes) {
@@ -166,7 +179,8 @@ function routesMarkup(routes) {
       const nextProbe = route.health === "unavailable" && route.next_probe_at_ms != null ? formatRelativeMs(route.next_probe_at_ms) : "—";
       return `<div class="table-row"><span>${escapeHtml(route.provider_name)}</span><span>${escapeHtml(route.upstream_model_name)}</span><span>${escapeHtml(route.protocol)}</span><span>${escapeHtml(route.cost_multiplier)}x</span><span class="health-cell"><span class="health health-${escapeHtml(route.health)}">${escapeHtml(route.health)}</span>${failureDetail}${httpDetail}${intervalDetail}</span><span>${route.state_age_seconds != null ? formatDuration(route.state_age_seconds) : "—"}</span><span>${formatTimestamp(route.last_checked_at)}</span><span>${nextProbe}</span><span class="route-actions"><button class="secondary compact" data-edit-route="${escapeHtml(route.id)}">编辑</button><button class="secondary compact" data-check-route="${escapeHtml(route.id)}" ${checking ? "disabled" : ""} title="${checking ? "启动检查进行中" : "运行原生协议检查"}">检查</button><span class="check-feedback" role="status"></span></span></div>`;
     }).join("");
-    return `<section class="route-group"><div class="table-heading"><h3 class="route-group-title">${escapeHtml(modelName)}</h3></div><div class="data-table routes-table"><div class="table-head"><span>上游供应商</span><span>上游模型</span><span>协议</span><span>倍率</span><span>健康</span><span>状态时长</span><span>上次检查</span><span>下次探测</span><span>操作</span></div>${rows}</div></section>`;
+    const collapseId = `route-group:${modelName}`;
+    return `<section class="route-group${collapseClass(collapseId)}" data-collapse-section="${escapeHtml(collapseId)}"><div class="table-heading">${collapseToggle(collapseId, modelName)}<h3 class="route-group-title table-heading-title">${escapeHtml(modelName)}</h3></div><div class="collapse-body"><div class="data-table routes-table"><div class="table-head"><span>上游供应商</span><span>上游模型</span><span>协议</span><span>倍率</span><span>健康</span><span>状态时长</span><span>上次检查</span><span>下次探测</span><span>操作</span></div>${rows}</div></div></section>`;
   }).join("");
 }
 
@@ -187,7 +201,7 @@ function relayAccessKeyRows(keys, routes) {
 }
 
 function relayAccessKeysMarkup(keys, routes) {
-  return `<section class="table-region relay-key-region"><div class="table-heading"><div><h2>中转访问密钥</h2></div><button class="secondary" data-open-panel="relay-key">创建访问密钥</button></div><div class="relay-key-tools"><label>搜索访问密钥<input id="relay-key-search" type="search" autocomplete="off"></label></div><div class="relay-key-list" id="relay-key-list">${relayAccessKeyRows(keys, routes)}</div></section>`;
+  return `<section class="table-region relay-key-region${collapseClass("relay-keys")}" data-collapse-section="relay-keys"><div class="table-heading">${collapseToggle("relay-keys", "中转访问密钥")}<div class="table-heading-title"><h2>中转访问密钥</h2></div><button class="secondary" data-open-panel="relay-key">创建访问密钥</button></div><div class="collapse-body"><div class="relay-key-tools"><label>搜索访问密钥<input id="relay-key-search" type="search" autocomplete="off"></label></div><div class="relay-key-list" id="relay-key-list">${relayAccessKeyRows(keys, routes)}</div></div></section>`;
 }
 
 function formatTimestamp(timestamp) {
@@ -317,12 +331,12 @@ function operationsStatusMarkup(state) {
 }
 
 function routesRegionMarkup(state) {
-  return `<div class="table-heading"><h2>模型路由</h2><button class="secondary" data-open-panel="route" ${state.providers.length ? "" : "disabled"}>添加模型路由</button></div>${routesMarkup(state.routes)}`;
+  return `<div class="table-heading">${collapseToggle("routes", "模型路由")}<h2 class="table-heading-title">模型路由</h2><button class="secondary" data-open-panel="route" ${state.providers.length ? "" : "disabled"}>添加模型路由</button></div><div class="collapse-body">${routesMarkup(state.routes)}</div>`;
 }
 
 function operationsMarkup(state, relayAccessKeys) {
   const checklistComplete = checklistState(state, relayAccessKeys).complete;
-  return `<div class="title-row"><div><p class="eyebrow">管理</p><h1>操作台</h1><p class="muted last-refresh" id="last-refresh">尚未自动刷新</p></div><button id="add-route" ${state.providers.length ? "" : "disabled"}>添加模型路由</button></div><section class="status-grid" id="ops-status" aria-label="运行状态">${operationsStatusMarkup(state)}</section>${checklistComplete ? "" : checklistMarkup(state, relayAccessKeys, "ops-checklist")}<section class="table-region" id="ops-routes">${routesRegionMarkup(state)}</section>${relayAccessKeysMarkup(relayAccessKeys, state.routes)}<section class="table-region provider-region" id="ops-providers">${providersMarkup(state.providers)}</section><section class="table-region upstream-model-region" id="ops-upstream-models">${upstreamModelsMarkup(state)}</section><section class="table-region catalog-region" id="ops-catalog">${catalogMarkup(state.catalog)}</section><div id="focused-panel"></div>`;
+  return `<div class="title-row"><div><p class="eyebrow">管理</p><h1>操作台</h1><p class="muted last-refresh" id="last-refresh">尚未自动刷新</p></div><button id="add-route" ${state.providers.length ? "" : "disabled"}>添加模型路由</button></div><section class="status-grid" id="ops-status" aria-label="运行状态">${operationsStatusMarkup(state)}</section>${checklistComplete ? "" : checklistMarkup(state, relayAccessKeys, "ops-checklist")}<section class="table-region${collapseClass("routes")}" id="ops-routes" data-collapse-section="routes">${routesRegionMarkup(state)}</section>${relayAccessKeysMarkup(relayAccessKeys, state.routes)}<section class="table-region provider-region${collapseClass("providers")}" id="ops-providers" data-collapse-section="providers">${providersMarkup(state.providers)}</section><section class="table-region upstream-model-region${collapseClass("upstream-models")}" id="ops-upstream-models" data-collapse-section="upstream-models">${upstreamModelsMarkup(state)}</section><section class="table-region catalog-region${collapseClass("catalog")}" id="ops-catalog" data-collapse-section="catalog">${catalogMarkup(state.catalog)}</section><div id="focused-panel"></div>`;
 }
 
 const DEFAULT_CALLS_PAGE_SIZE = 25;
@@ -832,8 +846,17 @@ let currentView = null;
 // a status card from also opening the backups panel.
 function installOperationsDelegation() {
   document.querySelector("#app").addEventListener("click", async (event) => {
-    const target = event.target.closest("[data-open-events], [data-open-backups], [data-open-recovery], [data-open-panel], [data-edit-provider], [data-edit-route], [data-check-route], [data-edit-prices], [data-deprecate-model], [data-create-upstream-model], [data-refresh-provider-models], [data-edit-key], [data-revoke-key], [data-copy-secret]");
+    const target = event.target.closest("[data-collapse-toggle], [data-open-events], [data-open-backups], [data-open-recovery], [data-open-panel], [data-edit-provider], [data-edit-route], [data-check-route], [data-edit-prices], [data-deprecate-model], [data-create-upstream-model], [data-refresh-provider-models], [data-edit-key], [data-revoke-key], [data-copy-secret]");
     if (!target) return;
+    if (target.hasAttribute("data-collapse-toggle")) {
+      const id = target.dataset.collapseToggle;
+      if (COLLAPSED_SECTIONS.has(id)) COLLAPSED_SECTIONS.delete(id); else COLLAPSED_SECTIONS.add(id);
+      const collapsed = COLLAPSED_SECTIONS.has(id);
+      target.closest("[data-collapse-section]")?.classList.toggle("collapsed", collapsed);
+      target.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      target.title = collapsed ? "展开" : "折叠";
+      return;
+    }
     if (target.hasAttribute("data-open-events")) { showEventsPanel(target.dataset.openEvents); return; }
     if (target.hasAttribute("data-open-backups")) { showBackupsPanel(); return; }
     if (target.hasAttribute("data-open-recovery")) { showRecoveryPanel(operationsState?.recovery); return; }
