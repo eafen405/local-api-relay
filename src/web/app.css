@@ -81,6 +81,7 @@ input, select { border: 1px solid #a9b8b7; border-radius: 4px; min-height: 40px;
 .collapse-chevron { display: inline-block; transition: transform .15s ease; }
 .collapse-toggle[aria-expanded="false"] .collapse-chevron { transform: rotate(-90deg); }
 .table-heading-title { margin-right: auto; }
+.usage-model-head { align-items: center; display: flex; }
 [data-collapse-section].collapsed > .collapse-body { display: none; }
 .empty { border: 1px dashed #a9b8b7; padding: 36px 24px; text-align: center; }
 .empty p { margin: 0 auto; max-width: 500px; }
