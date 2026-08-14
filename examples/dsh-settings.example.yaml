@@ -1,19 +1,18 @@
-# DSH（DeepSeek Harness）接入本地中转的配置模板
+# DSH（DeepSeek Harness）接入本地中转的配置模板 —— 供服务器 agent 参考。
+# 放置位置：$DSH_HOME/settings.yaml（热加载，无需重启）。
+# 密钥变量写在 $DSH_HOME/.credentials.yaml，形如：
+#   LOCAL_DEEPSEEK_API_KEY: lar_...
+#   LOCAL_GPT_API_KEY: lar_...
 
-供服务器上的部署 agent 参考。放入 `$DSH_HOME/settings.yaml`（热加载，无需重启）。
-密钥变量写在 `$DSH_HOME/.credentials.yaml`，形如：
+# ⚠️ 关键：手工声明的 provider（route 不在 pi-ai 内置目录里）不会继承内置目录的
+#    contextWindow / maxTokens，会回退到 256K / 32K 默认值。务必在每个模型条目上
+#    显式写死这两个字段，否则长上下文会被 DSH 提前截断/压缩。
 
-```yaml
-LOCAL_DEEPSEEK_API_KEY: lar_...
-LOCAL_GPT_API_KEY: lar_...
-```
-
-```yaml
 # 主代理默认模型：走中转的 chat_completions 协议
 agent-default-model:
   provider: local-deepseek
   model: <你的发布模型名，例如 deepseek-v4-pro>
-  reasoningEffort: max
+  # reasoningEffort: max   # 可选；deepseek 思考模型仅支持 off/high/max
 
 llm-pi-ai:
   providers:
@@ -28,7 +27,11 @@ llm-pi-ai:
         thinkingFormat: deepseek
       models:
         - id: <发布模型名 A>
+          contextWindow: 1000000   # 按上游真实能力填写，不要留空
+          maxTokens: 384000
         - id: <发布模型名 B>
+          contextWindow: 1000000
+          maxTokens: 384000
 
     # responses 协议：只服务 /v1/responses 的中转路由
     local-gpt:
@@ -38,19 +41,5 @@ llm-pi-ai:
       baseURL: http://127.0.0.1:8787/v1
       models:
         - id: <发布模型名 C>
-```
-
-子代理固定模型：写在 preset 的 `agent.cordis.yml`（例如 `$DSH_HOME/.agent-presets/<preset>/agent.cordis.yml`），
-把 `tool-subagent` 与 `tool-subagent-fork` 两行的 `agentOptions` 指向中转路由：
-
-```yaml
-agentOptions:
-  provider: local-deepseek
-  model: <你的发布模型名，例如 deepseek-v4-flash>
-```
-
-注意：
-- 发布模型名必须与中转里 `POST /admin/published-models` 的 `name` 完全一致；
-- 协议必须匹配：中转的 `chat_completions` 路由用 `api: openai-completions`，`responses` 路由用 `api: openai-responses`；
-- 密钥变量名（`LOCAL_DEEPSEEK_API_KEY` 等）对应 `.credentials.yaml` 里的 key，值为中转创建的 `lar_...` 密钥。
-
+          contextWindow: 272000   # gpt-5.6 系目录值；按你的上游真实能力填写
+          maxTokens: 128000
