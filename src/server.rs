@@ -31,9 +31,9 @@ const SESSION_SECONDS: i64 = 8 * 60 * 60;
 /// user-visible deadlines and this cap only prevents unbounded hangs.
 const UPSTREAM_HARD_TIMEOUT: Duration = Duration::from_secs(3_600);
 
-/// The relay's inbound request body limit (1 MiB); the value and its API-016
+/// The relay's inbound request body limit (16 MiB); the value and its API-016
 /// semantics are documented in the README "Relay Calls" section.
-const MAX_RELAY_REQUEST_BODY_BYTES: usize = 1024 * 1024;
+const MAX_RELAY_REQUEST_BODY_BYTES: usize = 16 * 1024 * 1024;
 
 /// The bounded graceful-stop drain window (PKG-012): after a stop signal the
 /// service stops accepting new calls and waits at most this long for in-flight

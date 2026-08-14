@@ -14,9 +14,9 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-/// A body one KiB over the documented 1 MiB relay request body limit, so the
+/// A body one KiB over the documented 16 MiB relay request body limit, so the
 /// 413 assertions always exercise the over-limit branch (API-016).
-const OVER_LIMIT_BODY_CHARS: usize = 1024 * 1024 + 1024;
+const OVER_LIMIT_BODY_CHARS: usize = 16 * 1024 * 1024 + 1024;
 
 struct TestEnvironment {
     root: PathBuf,
@@ -7173,7 +7173,7 @@ async fn relay_accepts_request_bodies_larger_than_16_kib_and_rejects_oversized_o
 
     // A >16 KiB multi-turn/tool-call style payload must pass end-to-end for
     // both native protocols, with the upstream receiving the full preserved
-    // body (API-006); the documented 1 MiB request body limit still rejects
+    // body (API-006); the documented 16 MiB request body limit still rejects
     // oversized bodies immediately without an upstream attempt or health
     // change (API-016).
     let (chat_url, chat_requests, chat_worker) = scripted_http_upstream(vec![

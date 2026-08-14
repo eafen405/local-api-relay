@@ -116,7 +116,7 @@ curl -s http://127.0.0.1:8787/v1/chat/completions -H "Authorization: Bearer $KEY
 
 ### 7. 资源占用（实测）
 
-含多路由中转流量的实测：RSS 常驻约 15MB、峰值不变、无 Swap、CPU 约 0.1%。可变项只有非流式响应整包缓冲（内存 ≈ 并发数 × 响应体），请求体上限 1MiB。systemd 用户单元建议 `MemoryMax=256M` 兜底。
+含多路由中转流量的实测：RSS 常驻约 15MB、峰值不变、无 Swap、CPU 约 0.1%。可变项只有请求体与响应体的整包缓冲（内存 ≈ 并发数 × 单次请求体/响应体），请求体上限 16MiB。systemd 用户单元建议 `MemoryMax=256M` 兜底。
 
 ### 8. 接入客户端 / DSH
 
@@ -210,7 +210,7 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 
 The relay only exposes published models for which the key has a currently available Chat Completions model route. It replaces the published model and client key only at the upstream boundary, preserves unknown request and response fields, and restores the published model in successful responses.
 
-Inbound request bodies are limited to 1 MiB (1,048,576 bytes), which comfortably covers multi-turn harness conversations and tool-call payloads; a larger body is rejected immediately with `413` and never reaches upstream routing (API-016).
+Inbound request bodies are limited to 16 MiB (16,777,216 bytes), comfortably covering multi-turn harness conversations, tool-call payloads, and 1M-context sessions; a larger body is rejected immediately with `413` and never reaches upstream routing (API-016).
 
 ## Verification
 
