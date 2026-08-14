@@ -195,6 +195,14 @@ serving_now() {
     [ "${2:-}" = "200" ]
 }
 
+# PIDs of the process serving the configured port when no script-managed
+# pidfile exists (a serve started directly by the Windows login task, ticket
+# 30/32). Matches the stable entry command line only, never the lifecycle
+# script's own shell or an unrelated binary.
+serving_pids() {
+    pgrep -f "^$entry serve" 2>/dev/null || true
+}
+
 # Waits until the configured port stops answering ready, bounded.
 wait_not_serving() {
     local timeout_ms="$1" now_ms deadline_ms
@@ -253,22 +261,54 @@ start() {
 }
 
 stop() {
-    if [ ! -f "$pidfile" ] || ! pid_alive "$(cat "$pidfile")"; then
+    local pids=""
+    if [ -f "$pidfile" ] && pid_alive "$(cat "$pidfile")"; then
+        pids=$(cat "$pidfile")
+    elif serving_now; then
+        # A serve started directly by the Windows login task leaves no
+        # pidfile (ticket 30/32): recognize it by the port probe and end its
+        # owning task, then terminate the process by matching the stable
+        # entry command line — otherwise stop/restart report "not running"
+        # while the old process keeps the port and a fresh binary cannot bind.
+        if task_registered; then
+            schtasks.exe /End /TN "$windows_task_name" >/dev/null 2>&1 || true
+        fi
+        pids=$(serving_pids)
+        if [ -z "$pids" ]; then
+            echo "local-api-relay: relay answers on 127.0.0.1:$port but no $entry serve process was found; leaving it running" >&2
+            return 0
+        fi
+    else
         rm -f "$pidfile"
         rotate_captured_log
         echo "local-api-relay: not running"
         return 0
     fi
     local pid
-    pid=$(cat "$pidfile")
-    # SIGTERM triggers the bounded graceful drain inside the service (PKG-012).
-    kill -TERM "$pid" 2>/dev/null || true
-    local deadline=$(( $(date +%s) + 35 ))
-    while pid_alive "$pid" && [ "$(date +%s)" -lt "$deadline" ]; do
-        sleep 0.25
+    for pid in $pids; do
+        # SIGTERM triggers the bounded graceful drain inside the service (PKG-012).
+        kill -TERM "$pid" 2>/dev/null || true
     done
-    if pid_alive "$pid"; then
-        kill -KILL "$pid" 2>/dev/null || true
+    local deadline=$(( $(date +%s) + 35 ))
+    local any_alive=true
+    while [ "$any_alive" = "true" ] && [ "$(date +%s)" -lt "$deadline" ]; do
+        any_alive=false
+        for pid in $pids; do
+            if pid_alive "$pid"; then
+                any_alive=true
+                break
+            fi
+        done
+        [ "$any_alive" = "true" ] && sleep 0.25
+    done
+    local forced=false
+    for pid in $pids; do
+        if pid_alive "$pid"; then
+            kill -KILL "$pid" 2>/dev/null || true
+            forced=true
+        fi
+    done
+    if [ "$forced" = "true" ]; then
         echo "local-api-relay: stopped (forced after the drain window)"
     else
         echo "local-api-relay: stopped"
