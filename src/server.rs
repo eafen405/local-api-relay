@@ -2861,17 +2861,21 @@ where
                 final_error = Some(error);
                 continue;
             }
-            // Health-neutral upstream 4xx ends the call without Fallback
-            // (ROUTE-009); the attempt is still part of the call record.
+            // Health-neutral upstream 4xx: the route itself is not blamed and
+            // not quarantined, but the call still moves to the next candidate
+            // (ROUTE-009 amended). Third-party upstreams mislabel overload and
+            // channel failures as 4xx and disagree on parameter tolerance, so
+            // ending the chain on the first 4xx would strand the remaining
+            // candidates — including a reliable official route — and surface
+            // a failure the chain could have absorbed.
             recorder.finish_model_route_attempt(
                 Some(status.as_u16() as i64),
                 Some(health_neutral_http_category().to_owned()),
                 CommitPhase::PreCommit,
-                ModelRouteAttemptOutcome::Failed,
+                outcome,
             );
-            let record = recorder.finalize(false);
-            write_call_record(state, &record);
-            return Err(error);
+            final_error = Some(error);
+            continue;
         }
         match on_success(state, recorder, status, upstream).await {
             PreCommitOutcome::Committed(response) => {
@@ -3265,7 +3269,8 @@ fn relay_error_category(error: &RelayError) -> &'static str {
 }
 
 /// Stable normalized category for health-neutral upstream 4xx responses that
-/// must not trigger Fallback or quarantine (ROUTE-009).
+/// must not quarantine the route; the call still falls back to the next
+/// candidate (ROUTE-009 amended).
 fn health_neutral_http_category() -> &'static str {
     "upstream_http_4xx"
 }

@@ -7322,6 +7322,96 @@ async fn relay_accepts_request_bodies_larger_than_16_kib_and_rejects_oversized_o
 }
 
 #[tokio::test]
+async fn health_neutral_4xx_falls_back_to_the_next_candidate_and_stays_unblamed() {
+    let environment = TestEnvironment::new("health-neutral-4xx-fallback");
+    let bootstrap_credential = environment.initialize();
+    let port = available_port();
+    let mut server = environment.start(port);
+    let client = Client::new();
+    wait_ready(&client, port).await;
+    let base = format!("http://127.0.0.1:{port}");
+    let active_cookie = activate_administrator(&client, &base, &bootstrap_credential).await;
+
+    // Route A (cheapest) mislabels an upstream failure as a health-neutral
+    // 400; route B is healthy. The call must fall through to B and succeed
+    // instead of ending on the first 4xx (ROUTE-009 amended), and A must
+    // stay available (health-neutral, no quarantine). The scripted upstream
+    // serves the create-time native probe first, then the real call.
+    let success = complete_chat_response();
+    let (first_url, first_requests, first_worker) = scripted_http_upstream(vec![
+        http_json_response(&success),
+        http_status_response(400, "Bad Request", "{\"error\":{\"message\":\"busy\"}}"),
+    ]);
+    let (second_url, second_requests, second_worker) = scripted_http_upstream(vec![
+        http_json_response(&success),
+        http_json_response(&success),
+    ]);
+    let first_route = configure_route(
+        &client,
+        &base,
+        &active_cookie,
+        first_url,
+        "chat_completions",
+        "hn-4xx-a",
+        "gpt-5.6-sol",
+        "1",
+    )
+    .await;
+    let second_route = configure_route(
+        &client,
+        &base,
+        &active_cookie,
+        second_url,
+        "chat_completions",
+        "hn-4xx-b",
+        "gpt-5.6-sol",
+        "2",
+    )
+    .await;
+    for requests in [&first_requests, &second_requests] {
+        requests.recv_timeout(Duration::from_secs(2)).unwrap();
+    }
+    let relay_secret = client
+        .post(format!("{base}/admin/relay-access-keys"))
+        .header(header::COOKIE, &active_cookie)
+        .json(&json!({
+            "label": "Health neutral 4xx fallback client",
+            "model_route_ids": [first_route, second_route]
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json::<serde_json::Value>()
+        .await
+        .unwrap()["secret"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let response = client
+        .post(format!("{base}/v1/chat/completions"))
+        .header(header::AUTHORIZATION, format!("Bearer {relay_secret}"))
+        .json(&json!({
+            "model": "gpt-5.6-sol",
+            "messages": [{ "role": "user", "content": "fall through 4xx" }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        route_health(&client, &base, &active_cookie, &first_route).await,
+        "available",
+        "a health-neutral 4xx must not quarantine the route"
+    );
+    // The second candidate actually served the call.
+    assert!(second_requests.try_recv().is_ok());
+    first_worker.join().unwrap();
+    second_worker.join().unwrap();
+    server.kill().unwrap();
+    server.wait().unwrap();
+}
+#[tokio::test]
 async fn non_streaming_candidate_exhaustion_quarantines_all_routes_and_returns_the_final_error() {
     let environment = TestEnvironment::new("non-streaming-exhaustion");
     let bootstrap_credential = environment.initialize();
