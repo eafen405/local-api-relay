@@ -99,6 +99,7 @@ fn windows_base_dir(variable: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+#[cfg(not(windows))]
 fn xdg_path(variable: &str, fallback_relative_to_home: &str) -> Result<PathBuf> {
     match env::var_os(variable) {
         Some(value) => {
@@ -132,6 +133,8 @@ pub fn restrict_file(path: &Path) -> Result<()> {
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))
             .with_context(|| format!("could not secure {}", path.display()))?;
     }
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 

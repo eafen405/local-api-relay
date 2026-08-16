@@ -3815,8 +3815,15 @@ pub fn restore_database_at_paths(
         live_schema,
         now,
     ) {
-        Ok(artifact) => artifact,
+        Ok(artifact) => {
+            // The read-only live connection must be closed before any file
+            // switch: Windows does not allow renaming a SQLite file that still
+            // has an open handle, while Unix does (DATA-015).
+            drop(live_connection);
+            artifact
+        }
         Err(failure) => {
+            drop(live_connection);
             let reason = format!("could not preserve the current database: {failure}");
             record_restore_failure_at_paths(
                 database_path,
