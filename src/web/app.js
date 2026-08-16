@@ -95,7 +95,7 @@ function renderPasswordChange() {
 }
 
 function shellMarkup(view) {
-  return `<section class="shell"><header class="topbar"><div class="topbar-inner"><span class="brand">Local API Relay</span><nav class="navigation" aria-label="主导航"><button class="nav" data-view="operations" aria-current="${view === "operations" ? "page" : "false"}">操作台</button><button class="nav" data-view="usage" aria-current="${view === "usage" ? "page" : "false"}">调用与用量</button></nav><button class="secondary account-action" id="sign-out">退出登录</button></div></header><main class="content" id="content"></main></section>`;
+  return `<section class="shell"><aside class="sidebar"><div class="sidebar-header"><span class="brand">Local API Relay</span></div><nav class="navigation" aria-label="主导航"><button class="nav" data-view="operations" aria-current="${view === "operations" ? "page" : "false"}">操作台</button><button class="nav" data-view="usage" aria-current="${view === "usage" ? "page" : "false"}">调用与用量</button><button class="nav" data-view="settings" aria-current="${view === "settings" ? "page" : "false"}">设置</button></nav><button class="secondary account-action" id="sign-out">退出登录</button></aside><main class="content" id="content"></main></section>`;
 }
 
 // UI-010: collapsible sections keep the Operations page scannable. The
@@ -336,7 +336,7 @@ function routesRegionMarkup(state) {
 
 function operationsMarkup(state, relayAccessKeys) {
   const checklistComplete = checklistState(state, relayAccessKeys).complete;
-  return `<div class="title-row"><div><p class="eyebrow">管理</p><h1>操作台</h1><p class="muted last-refresh" id="last-refresh">尚未自动刷新</p></div><button id="add-route" ${state.providers.length ? "" : "disabled"}>添加模型路由</button></div><section class="status-grid" id="ops-status" aria-label="运行状态">${operationsStatusMarkup(state)}</section>${checklistComplete ? "" : checklistMarkup(state, relayAccessKeys, "ops-checklist")}<section class="table-region${collapseClass("routes")}" id="ops-routes" data-collapse-section="routes">${routesRegionMarkup(state)}</section>${relayAccessKeysMarkup(relayAccessKeys, state.routes)}<section class="table-region provider-region${collapseClass("providers")}" id="ops-providers" data-collapse-section="providers">${providersMarkup(state.providers)}</section><section class="table-region upstream-model-region${collapseClass("upstream-models")}" id="ops-upstream-models" data-collapse-section="upstream-models">${upstreamModelsMarkup(state)}</section><section class="table-region catalog-region${collapseClass("catalog")}" id="ops-catalog" data-collapse-section="catalog">${catalogMarkup(state.catalog)}</section><div id="focused-panel"></div>`;
+  return `<div class="title-row"><div><p class="eyebrow">管理</p><h1>操作台</h1><p class="muted last-refresh" id="last-refresh">尚未自动刷新</p></div><button id="add-route" ${state.providers.length ? "" : "disabled"}>添加模型路由</button></div><section class="status-grid" id="ops-status" aria-label="运行状态">${operationsStatusMarkup(state)}</section>${checklistComplete ? "" : checklistMarkup(state, relayAccessKeys, "ops-checklist")}<div class="workbench-grid operations-workbench"><section class="workbench-main"><section class="table-region${collapseClass("routes")}" id="ops-routes" data-collapse-section="routes">${routesRegionMarkup(state)}</section>${relayAccessKeysMarkup(relayAccessKeys, state.routes)}</section><aside class="workbench-aside"><section class="table-region provider-region${collapseClass("providers")}" id="ops-providers" data-collapse-section="providers">${providersMarkup(state.providers)}</section><section class="table-region upstream-model-region${collapseClass("upstream-models")}" id="ops-upstream-models" data-collapse-section="upstream-models">${upstreamModelsMarkup(state)}</section><section class="table-region catalog-region${collapseClass("catalog")}" id="ops-catalog" data-collapse-section="catalog">${catalogMarkup(state.catalog)}</section></aside></div><div id="focused-panel"></div>`;
 }
 
 const DEFAULT_CALLS_PAGE_SIZE = 25;
@@ -405,7 +405,16 @@ function usageMarkup(state) {
     const collapseId = `usage-model:${model.published_model_name}`;
     return `<article class="usage-model${collapseClass(collapseId)}" data-collapse-section="${escapeHtml(collapseId)}"><div class="usage-model-head">${collapseToggle(collapseId, model.published_model_name)}<h3 class="table-heading-title">${escapeHtml(model.published_model_name)} <small>占输入 ${modelShare}</small></h3></div><div class="collapse-body"><div class="data-table usage-table"><div class="table-head"><span>上游供应商</span><span>输入占比</span><span>输入 Token</span><span>缓存输入</span><span>输出 Token</span><span>预估费用</span></div>${providers || `<div class="empty"><p>暂无用量记录</p></div>`}</div></div></article>`;
   }).join("");
-  return `<div class="title-row"><div><p class="eyebrow">管理</p><h1>调用与用量</h1></div></div><section class="window-selector" aria-label="用量窗口">${windows.map((w) => `<button class="secondary compact${w === window ? " selected" : ""}" data-usage-window="${w}">${w}</button>`).join("")}</section>${usageIntegrityMarkup(state.usage_integrity)}<section class="usage-grid" aria-label="用量汇总"><article class="metric"><h3>输入 Token</h3><p class="number">${metric(totals.input_tokens)}</p></article><article class="metric"><h3>缓存输入</h3><p class="number">${metric(totals.cached_input_tokens)}</p></article><article class="metric"><h3>输出 Token</h3><p class="number">${metric(totals.output_tokens)}</p></article><article class="metric"><h3>缓存命中率</h3><p class="number">${hitRate}</p></article><article class="metric"><h3>预估费用</h3><p class="number">RMB ${metric(totals.estimated_cost_rmb)}</p></article></section><section class="table-region${collapseClass("usage-distribution")}" data-collapse-section="usage-distribution"><div class="table-heading">${collapseToggle("usage-distribution", "Token 分布")}<h2 class="table-heading-title">Token 分布</h2></div><div class="collapse-body">${distribution || `<div class="empty"><h2>暂无用量记录</h2><p>上报了用量的成功调用按发布模型和上游供应商显示在这里。</p></div>`}</div></section><section class="table-region${collapseClass("usage-calls")}" data-collapse-section="usage-calls"><div class="table-heading">${collapseToggle("usage-calls", "调用")}<h2 class="table-heading-title">调用</h2></div><div class="collapse-body">${callsTableMarkup(state)}</div></section>`;
+  return `<div class="title-row"><div><p class="eyebrow">管理</p><h1>调用与用量</h1></div></div><div class="workbench-grid usage-workbench"><section class="workbench-main"><section class="window-selector" aria-label="用量窗口">${windows.map((w) => `<button class="secondary compact${w === window ? " selected" : ""}" data-usage-window="${w}">${w}</button>`).join("")}</section><section class="usage-grid" aria-label="用量汇总"><article class="metric"><h3>输入 Token</h3><p class="number">${metric(totals.input_tokens)}</p></article><article class="metric"><h3>缓存输入</h3><p class="number">${metric(totals.cached_input_tokens)}</p></article><article class="metric"><h3>输出 Token</h3><p class="number">${metric(totals.output_tokens)}</p></article><article class="metric"><h3>缓存命中率</h3><p class="number">${hitRate}</p></article><article class="metric"><h3>预估费用</h3><p class="number">RMB ${metric(totals.estimated_cost_rmb)}</p></article></section><section class="table-region${collapseClass("usage-calls")}" data-collapse-section="usage-calls"><div class="table-heading">${collapseToggle("usage-calls", "调用")}<h2 class="table-heading-title">调用</h2></div><div class="collapse-body">${callsTableMarkup(state)}</div></section></section><aside class="workbench-aside">${usageIntegrityMarkup(state.usage_integrity)}<section class="table-region${collapseClass("usage-distribution")}" data-collapse-section="usage-distribution"><div class="table-heading">${collapseToggle("usage-distribution", "Token 分布")}<h2 class="table-heading-title">Token 分布</h2></div><div class="collapse-body">${distribution || `<div class="empty"><h2>暂无用量记录</h2><p>上报了用量的成功调用按发布模型和上游供应商显示在这里。</p></div>`}</div></section></aside></div>`;
+}
+
+function settingsMarkup() {
+  return `<div class="title-row"><div><p class="eyebrow">管理</p><h1>设置</h1><p class="muted">备份、迁移与恢复，以及路由行为参数。</p></div></div><section class="settings-grid" aria-label="设置"><article class="settings-card"><h2>数据安全</h2><p class="muted">查看备份、迁移与恢复状态，创建手动备份或从备份恢复。</p><button class="secondary" data-open-backups>打开数据安全</button></article><article class="settings-card"><h2>路由设置</h2><p class="muted">调整恢复探测间隔、倍增上限、超时与上游模型同步周期。</p><button class="secondary" data-open-recovery>打开路由设置</button></article></section><div id="focused-panel"></div>`;
+}
+
+function prepareSettings(state) {
+  operationsState = state;
+  operationsKeys = [];
 }
 
 function bindUsage(state) {
@@ -1033,16 +1042,20 @@ async function renderShell(view) {
   try {
     const state = view === "operations"
       ? await Promise.all([request("/admin/operations"), request("/admin/relay-access-keys")])
-      : [await request("/admin/calls-usage"), null];
-    content.innerHTML = view === "operations" ? operationsMarkup(state[0], state[1].data) : usageMarkup(state[0]);
+      : view === "usage"
+        ? [await request("/admin/calls-usage"), null]
+        : [await request("/admin/operations"), null];
+    content.innerHTML = view === "operations" ? operationsMarkup(state[0], state[1].data) : view === "usage" ? usageMarkup(state[0]) : settingsMarkup();
     if (view === "operations") {
       operationsState = state[0];
       operationsKeys = state[1].data;
       bindOperations(state[0], state[1].data);
       updateLastRefreshIndicator();
       startOperationsPolling();
-    } else {
+    } else if (view === "usage") {
       bindUsage(state[0]);
+    } else {
+      prepareSettings(state[0]);
     }
   } catch (error) {
     stopOperationsPolling();

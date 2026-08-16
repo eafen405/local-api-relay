@@ -792,8 +792,8 @@ async fn login_only(client: &Client, base: &str, credential: &str) -> String {
 
 #[tokio::test]
 async fn browser_login_lands_on_operations_default_view() {
-    // UI-001: the default view is Operations, the primary navigation carries
-    // exactly the two persistent views, and no Sub2API domain object
+    // UI-001/T3: the default view is Operations, the primary navigation
+    // carries the three persistent views, and no Sub2API domain object
     // (Accounts, Groups, Channels) appears anywhere (UI-003/UI-013).
     let (environment, base, server, _client, bootstrap_credential) =
         start_service("browser-login-default-view").await;
@@ -816,8 +816,8 @@ async fn browser_login_lands_on_operations_default_view() {
     assert_eq!(evidence["h1"], "操作台", "Operations is the default view");
     assert_eq!(
         evidence["navLabels"],
-        json!(["操作台", "调用与用量"]),
-        "the primary navigation carries exactly the two persistent views"
+        json!(["操作台", "调用与用量", "设置"]),
+        "the primary navigation carries the three persistent views"
     );
     assert_eq!(evidence["currentView"], "操作台");
     assert_eq!(evidence["hasStatusGrid"], true, "the status grid is present");
@@ -869,6 +869,117 @@ async fn browser_calls_usage_is_the_secondary_view_and_navigation_round_trips() 
     assert!(usage_text.contains("Token 分布"));
     assert!(usage_text.contains("尚无调用记录"));
     assert_eq!(evidence["backH1"], "操作台", "navigation round-trips");
+
+    server.kill();
+    drop(environment);
+}
+
+#[tokio::test]
+async fn browser_sidebar_workbench_shows_sidebar_and_multi_column_layout() {
+    // T3: the Operations default view renders a persistent sidebar, a
+    // 3-column status grid and a two-column workbench at desktop width; model
+    // routes, relay access keys, upstream providers, upstream models and the
+    // published-model catalog all remain on the page. Calls & usage keeps the
+    // same sidebar and a two-column workbench.
+    let (environment, base, server, _client, bootstrap_credential) =
+        start_service("browser-sidebar-workbench").await;
+    let Some(evidence) = browser_scenario(
+        "sidebar-workbench",
+        &base,
+        &bootstrap_credential,
+        Some(FINAL_CREDENTIAL),
+        None,
+    )
+    .await
+    else {
+        return;
+    };
+
+    assert_eq!(evidence["hasSidebar"], true, "the shell renders a sidebar");
+    assert_eq!(
+        evidence["navLabels"],
+        json!(["操作台", "调用与用量", "设置"]),
+        "the sidebar carries the three persistent views"
+    );
+    assert!(
+        evidence["operationsColumns"].as_u64().unwrap() >= 2,
+        "the Operations workbench has at least two columns at desktop width"
+    );
+    assert_eq!(
+        evidence["statusColumns"].as_u64().unwrap(),
+        3,
+        "the status cards form a 3-column grid at desktop width"
+    );
+    let regions = &evidence["regionCounts"];
+    assert_eq!(regions["routes"].as_u64().unwrap(), 1, "model routes region is present");
+    assert_eq!(regions["relayKeys"].as_u64().unwrap(), 1, "relay access keys region is present");
+    assert_eq!(regions["providers"].as_u64().unwrap(), 1, "upstream providers region is present");
+    assert_eq!(regions["upstreamModels"].as_u64().unwrap(), 1, "upstream models region is present");
+    assert_eq!(regions["catalog"].as_u64().unwrap(), 1, "published-model catalog region is present");
+    let main_regions = &evidence["mainRegions"];
+    assert_eq!(main_regions["routes"].as_u64().unwrap(), 1, "model routes live in the main column");
+    assert_eq!(main_regions["relayKeys"].as_u64().unwrap(), 1, "relay access keys live in the main column");
+    let aside_regions = &evidence["asideRegions"];
+    assert_eq!(aside_regions["providers"].as_u64().unwrap(), 1, "upstream providers live in the auxiliary column");
+    assert_eq!(aside_regions["upstreamModels"].as_u64().unwrap(), 1, "upstream models live in the auxiliary column");
+    assert_eq!(aside_regions["catalog"].as_u64().unwrap(), 1, "published-model catalog lives in the auxiliary column");
+    assert_eq!(evidence["usageHasSidebar"], true, "Calls & usage keeps the sidebar");
+    assert!(
+        evidence["usageColumns"].as_u64().unwrap() >= 2,
+        "the Calls & usage workbench has at least two columns at desktop width"
+    );
+    assert_eq!(
+        evidence["hasSettingsView"], true,
+        "the Settings view is reachable from the sidebar"
+    );
+
+    server.kill();
+    drop(environment);
+}
+
+#[tokio::test]
+async fn browser_narrow_viewport_falls_back_to_single_column() {
+    // T3: at <=760px the shell collapses to one column; Operations and Calls &
+    // usage remain usable with single-column content.
+    let (environment, base, server, _client, bootstrap_credential) =
+        start_service("browser-narrow-single-column").await;
+    let Some(evidence) = browser_scenario(
+        "narrow-single-column",
+        &base,
+        &bootstrap_credential,
+        Some(FINAL_CREDENTIAL),
+        None,
+    )
+    .await
+    else {
+        return;
+    };
+
+    assert_eq!(
+        evidence["operationsColumns"].as_u64().unwrap(),
+        1,
+        "Operations workbench is a single column at <=760px"
+    );
+    assert_eq!(
+        evidence["statusColumns"].as_u64().unwrap(),
+        1,
+        "status cards collapse to a single column at <=760px"
+    );
+    assert_eq!(
+        evidence["usageColumns"].as_u64().unwrap(),
+        1,
+        "Calls & usage workbench is a single column at <=760px"
+    );
+    assert_eq!(
+        evidence["usageMetricColumns"].as_u64().unwrap(),
+        1,
+        "usage metric cards collapse to a single column at <=760px"
+    );
+    assert_eq!(
+        evidence["settingsColumns"].as_u64().unwrap(),
+        1,
+        "settings cards collapse to a single column at <=760px"
+    );
 
     server.kill();
     drop(environment);

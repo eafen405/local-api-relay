@@ -113,8 +113,8 @@ async function bodyText(page) {
 
 // ---------------------------------------------------------------------------
 // UI-001: login lands on the Operations default view; the primary navigation
-// carries Operations and Calls & usage; no Sub2API domain objects (Accounts,
-// Groups, Channels) appear anywhere in the surface.
+// carries Operations, Calls & usage and Settings; no Sub2API domain objects
+// (Accounts, Groups, Channels) appear anywhere in the surface.
 // ---------------------------------------------------------------------------
 async function loginDefaultView({ page, base, credential, newCredential }) {
   const mustChangePassword = await signIn(page, base, credential, newCredential);
@@ -552,9 +552,72 @@ async function statusAreaEventHistory({ page, base, credential, newCredential })
   return { title, eventRows, tableText };
 }
 
+// ---------------------------------------------------------------------------
+// T3: the workbench shell renders a persistent sidebar with three nav entries,
+// Operations content is split into two columns at desktop width, status cards
+// form a 3-column grid, all five Operations regions remain reachable, and the
+// Calls & usage view also keeps the sidebar and a two-column workbench.
+// ---------------------------------------------------------------------------
+async function sidebarWorkbench({ page, base, credential, newCredential }) {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await signIn(page, base, credential, newCredential);
+  await page.waitForSelector(".status-grid", { timeout: WAIT_TIMEOUT_MS });
+  await page.waitForSelector(".operations-workbench", { timeout: WAIT_TIMEOUT_MS });
+  const navLabels = (await page.locator('.navigation [data-view]').allTextContents()).map((label) => label.trim());
+  const hasSidebar = (await page.locator(".sidebar").count()) === 1;
+  const operationsColumns = await page.locator(".operations-workbench").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+  const statusColumns = await page.locator(".status-grid").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+  const regionCounts = {
+    routes: await page.locator("#ops-routes").count(),
+    relayKeys: await page.locator(".relay-key-region").count(),
+    providers: await page.locator("#ops-providers").count(),
+    upstreamModels: await page.locator("#ops-upstream-models").count(),
+    catalog: await page.locator("#ops-catalog").count(),
+  };
+  const mainRegions = {
+    routes: await page.locator(".workbench-main #ops-routes").count(),
+    relayKeys: await page.locator(".workbench-main .relay-key-region").count(),
+  };
+  const asideRegions = {
+    providers: await page.locator(".workbench-aside #ops-providers").count(),
+    upstreamModels: await page.locator(".workbench-aside #ops-upstream-models").count(),
+    catalog: await page.locator(".workbench-aside #ops-catalog").count(),
+  };
+  await page.click('.navigation [data-view="usage"]');
+  await page.waitForSelector(".usage-workbench", { timeout: WAIT_TIMEOUT_MS });
+  const usageColumns = await page.locator(".usage-workbench").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+  const usageHasSidebar = (await page.locator(".sidebar").count()) === 1;
+  await page.click('.navigation [data-view="settings"]');
+  await page.waitForSelector(".settings-grid", { timeout: WAIT_TIMEOUT_MS });
+  const hasSettingsView = (await page.locator(".settings-grid").count()) === 1;
+  return { navLabels, hasSidebar, operationsColumns, statusColumns, usageColumns, usageHasSidebar, hasSettingsView, regionCounts, mainRegions, asideRegions };
+}
+
+// ---------------------------------------------------------------------------
+// T3: at <=760px the shell collapses to a single column and both Operations
+// and Calls & usage remain usable with single-column content.
+// ---------------------------------------------------------------------------
+async function narrowSingleColumn({ page, base, credential, newCredential }) {
+  await page.setViewportSize({ width: 760, height: 900 });
+  await signIn(page, base, credential, newCredential);
+  await page.waitForSelector(".operations-workbench", { timeout: WAIT_TIMEOUT_MS });
+  const operationsColumns = await page.locator(".operations-workbench").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+  const statusColumns = await page.locator(".status-grid").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+  await page.click('.navigation [data-view="usage"]');
+  await page.waitForSelector(".usage-workbench", { timeout: WAIT_TIMEOUT_MS });
+  const usageColumns = await page.locator(".usage-workbench").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+  const usageMetricColumns = await page.locator(".usage-grid").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+  await page.click('.navigation [data-view="settings"]');
+  await page.waitForSelector(".settings-grid", { timeout: WAIT_TIMEOUT_MS });
+  const settingsColumns = await page.locator(".settings-grid").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length);
+  return { operationsColumns, statusColumns, usageColumns, usageMetricColumns, settingsColumns };
+}
+
 const scenarios = {
   "login-default-view": loginDefaultView,
   "usage-secondary-view": usageSecondaryView,
+  "sidebar-workbench": sidebarWorkbench,
+  "narrow-single-column": narrowSingleColumn,
   "route-groups": routeGroups,
   "focus-panels": focusPanels,
   "relay-key": relayKey,
