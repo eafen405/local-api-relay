@@ -18,10 +18,24 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: target
+          workspaces: |
+            target
+            src-tauri/target
 
-      - name: Build
+      - name: Build relay
         run: cargo build --locked
+
+      - name: Stage relay sidecar for Tauri shell
+        shell: bash
+        run: |
+          mkdir -p src-tauri/binaries
+          cp target/debug/local-api-relay.exe src-tauri/binaries/local-api-relay-x86_64-pc-windows-msvc.exe
+
+      - name: Build Tauri shell
+        run: cargo build --manifest-path src-tauri/Cargo.toml
+
+      - name: Run Tauri shell unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: Run Windows native smoke
         run: cargo test --locked --test windows_native
