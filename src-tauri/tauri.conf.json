@@ -14,7 +14,15 @@
   },
   "bundle": {
     "active": true,
+    "targets": ["nsis"],
     "externalBin": ["binaries/local-api-relay"],
-    "icon": ["icons/icon.ico"]
+    "icon": ["icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "startMenuFolder": "Local API Relay",
+        "installerHooks": "installer-hooks.nsh"
+      }
+    }
   }
 }

@@ -22,20 +22,128 @@ jobs:
             target
             src-tauri/target
 
-      - name: Build relay
-        run: cargo build --locked
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+
+      - name: Build relay (release)
+        run: cargo build --locked --release
 
       - name: Stage relay sidecar for Tauri shell
         shell: bash
         run: |
           mkdir -p src-tauri/binaries
-          cp target/debug/local-api-relay.exe src-tauri/binaries/local-api-relay-x86_64-pc-windows-msvc.exe
+          cp target/release/local-api-relay.exe src-tauri/binaries/local-api-relay-x86_64-pc-windows-msvc.exe
 
-      - name: Build Tauri shell
-        run: cargo build --manifest-path src-tauri/Cargo.toml
+      - name: Verify GUI and sidecar versions match
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $relayVersion = ((& ./target/release/local-api-relay.exe --version).Trim() -replace '^local-api-relay ', '')
+          $shellVersion = (Get-Content ./src-tauri/Cargo.toml | Select-String '^version = "([^"]+)"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -First 1)
+          $config = Get-Content ./src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          if ($relayVersion -ne $shellVersion) {
+            throw "sidecar version '$relayVersion' does not match shell version '$shellVersion'"
+          }
+          if ($shellVersion -ne $config.version) {
+            throw "shell version '$shellVersion' does not match tauri.conf.json version '$($config.version)'"
+          }
+          Write-Host "versions match: relay=$relayVersion shell=$shellVersion config=$($config.version)"
+
+      - name: Build Tauri shell and NSIS installer
+        working-directory: src-tauri
+        run: cargo tauri build --bundles nsis --ci
 
       - name: Run Tauri shell unit tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --release --manifest-path src-tauri/Cargo.toml
 
       - name: Run Windows native smoke
-        run: cargo test --locked --test windows_native
+        run: cargo test --locked --release --test windows_native
+
+      - name: Smoke test NSIS installer (silent install/verify/uninstall)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-ChildItem ./src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          if (-not $installer) { throw "NSIS installer not found" }
+          Write-Host "Using installer: $($installer.FullName)"
+
+          $installDir = Join-Path $env:LOCALAPPDATA 'Local API Relay'
+          $desktopDir = [Environment]::GetFolderPath('Desktop')
+          if (-not $desktopDir) { $desktopDir = Join-Path $env:USERPROFILE 'Desktop' }
+          New-Item -ItemType Directory -Force -Path $desktopDir | Out-Null
+          $desktopShortcut = Join-Path $desktopDir 'Local API Relay.lnk'
+
+          # Clean any leftovers from a previous run (fresh runner normally has none).
+          if (Test-Path $installDir) { Remove-Item -Recurse -Force $installDir }
+          if (Test-Path $desktopShortcut) { Remove-Item -Force $desktopShortcut }
+
+          # Create user-data sentinels to prove uninstall preserves them.
+          $markerDirs = @(
+            (Join-Path $env:APPDATA 'local-api-relay'),
+            (Join-Path $env:LOCALAPPDATA 'local-api-relay')
+          )
+          foreach ($dir in $markerDirs) {
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Set-Content -Path (Join-Path $dir 'ci-preserve-marker.txt') -Value 'keep' -NoNewline
+          }
+
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "silent install failed with exit code $($install.ExitCode)" }
+
+          $mainExe = Join-Path $installDir 'local-api-relay-shell.exe'
+          $sidecarExe = Join-Path $installDir 'local-api-relay.exe'
+          $deadline = (Get-Date).AddMinutes(2)
+          while ((-not (Test-Path $mainExe)) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+          }
+          if (-not (Test-Path $mainExe)) { throw "installed GUI exe not found: $mainExe" }
+          if (-not (Test-Path $sidecarExe)) { throw "installed sidecar not found: $sidecarExe" }
+          if (-not (Test-Path $desktopShortcut)) { throw "desktop shortcut not found: $desktopShortcut" }
+
+          $wsh = New-Object -ComObject WScript.Shell
+          $desktopShortcutTarget = $wsh.CreateShortcut($desktopShortcut).TargetPath
+          if ($desktopShortcutTarget -ne $mainExe) {
+            throw "desktop shortcut target '$desktopShortcutTarget' != '$mainExe'"
+          }
+
+          $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          foreach ($name in @('LocalApiRelay', 'Local API Relay')) {
+            if (Get-ItemProperty -Path $runKey -Name $name -ErrorAction SilentlyContinue) {
+              throw "unexpected autostart entry '$name' after install"
+            }
+          }
+          $services = Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*local-api-relay*' -or $_.DisplayName -like '*local-api-relay*' }
+          if ($services) { throw "unexpected Windows service registered after install: $($services.Name -join ', ')" }
+
+          $installedSidecarVersion = ((& $sidecarExe --version).Trim() -replace '^local-api-relay ', '')
+          $config = Get-Content ./src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          if ($installedSidecarVersion -ne $config.version) {
+            throw "installed sidecar version '$installedSidecarVersion' != GUI version '$($config.version)'"
+          }
+          Write-Host "installed sidecar version: $installedSidecarVersion"
+
+          # Kill the app if the installer launched it, so uninstall is clean.
+          Get-Process local-api-relay-shell, local-api-relay -ErrorAction SilentlyContinue | Stop-Process -Force
+
+          $uninstall = Start-Process -FilePath (Join-Path $installDir 'uninstall.exe') -ArgumentList '/S' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "silent uninstall failed with exit code $($uninstall.ExitCode)" }
+
+          $deadline = (Get-Date).AddMinutes(2)
+          while ((Test-Path $installDir) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+          }
+          if (Test-Path $installDir) { throw "install directory still exists after uninstall: $installDir" }
+          if (Test-Path $desktopShortcut) { throw "desktop shortcut still exists after uninstall: $desktopShortcut" }
+
+          foreach ($dir in $markerDirs) {
+            $marker = Join-Path $dir 'ci-preserve-marker.txt'
+            if (-not (Test-Path $marker)) { throw "user data directory was removed: $marker" }
+          }
+          Write-Host 'installer smoke passed: installed, shortcut created, uninstall clean, user data preserved'
+
+      - name: Upload NSIS installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-api-relay-windows-x64-installer
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
