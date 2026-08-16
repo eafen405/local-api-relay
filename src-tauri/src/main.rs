@@ -139,7 +139,7 @@ fn kill_sidecar(app: &tauri::AppHandle) {
 fn handle_tray_menu_event(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
     match event.id().as_ref() {
         MENU_SHOW => {
-            if let Some(window) = app.get_window("main") {
+            if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
@@ -222,7 +222,7 @@ fn main() {
         .setup(|app| {
             if let Err(error) = setup_app(app) {
                 eprintln!("local-api-relay shell setup failed: {error:#}");
-                return Err(Box::new(error));
+                return Err(Box::new(std::io::Error::other(error.to_string())));
             }
             Ok(())
         })

@@ -25,9 +25,11 @@ fn run_key() -> anyhow::Result<()> {
 pub fn is_enabled() -> bool {
     #[cfg(windows)]
     {
-        run_key()
-            .and_then(|key| key.get_value::<String, _>(AUTOSTART_VALUE_NAME).map(|_| ()))
-            .is_ok()
+        if let Ok(key) = run_key() {
+            key.get_value::<String, _>(AUTOSTART_VALUE_NAME).is_ok()
+        } else {
+            false
+        }
     }
     #[cfg(not(windows))]
     {
