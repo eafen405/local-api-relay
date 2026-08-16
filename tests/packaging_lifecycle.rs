@@ -2102,6 +2102,119 @@ fn initialize_with_schema(environment: &PackagingEnvironment, schema: i64) -> St
         .to_owned()
 }
 
+/// T2: `check --json` emits a complete machine-readable snapshot, keeps the
+/// existing human-readable text output parseable by packaging, and uses `null`
+/// (never the string "none") for a missing database schema.
+#[test]
+fn check_json_emits_complete_snapshot_and_text_remains_compatible() {
+    let environment = PackagingEnvironment::new("check-json");
+    let json_output = environment
+        .command()
+        .args(["check", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        json_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&json_output.stderr)
+    );
+    let stdout = String::from_utf8(json_output.stdout).unwrap();
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&stdout).expect("check --json prints valid JSON");
+    let object = snapshot.as_object().expect("check --json prints a JSON object");
+    for key in [
+        "version",
+        "port",
+        "supported_schema",
+        "database_schema",
+        "migration_needed",
+        "ready_url",
+    ] {
+        assert!(object.contains_key(key), "snapshot missing {key}: {snapshot}");
+    }
+    assert_eq!(snapshot["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(snapshot["port"], 8787);
+    assert_eq!(snapshot["supported_schema"], 17);
+    assert!(
+        snapshot["database_schema"].is_null(),
+        "missing schema must be JSON null, not a string: {snapshot}"
+    );
+    assert_eq!(snapshot["migration_needed"], false);
+    assert_eq!(snapshot["ready_url"], "http://127.0.0.1:8787/ready");
+
+    let text_output = environment.command().arg("check").output().unwrap();
+    assert!(
+        text_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&text_output.stderr)
+    );
+    let text = String::from_utf8(text_output.stdout).unwrap();
+    assert!(text.contains(&format!("version={}", env!("CARGO_PKG_VERSION"))));
+    assert!(text.contains("supported_schema=17"));
+    assert!(text.contains("port=8787"));
+    assert!(text.contains("database_schema=none"));
+    assert!(text.contains("migration_needed=false"));
+}
+
+/// T2: with an existing older database the JSON snapshot carries the numeric
+/// schema and a `true` migration flag, so consumers can distinguish "none"
+/// from a real migratable schema.
+#[test]
+fn check_json_reports_an_older_database_schema_as_migration_needed() {
+    let environment = PackagingEnvironment::new("check-json-old-schema");
+    initialize_with_schema(&environment, 9);
+    let json_output = environment
+        .command()
+        .args(["check", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        json_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&json_output.stderr)
+    );
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(json_output.stdout).unwrap())
+            .expect("check --json prints valid JSON");
+    assert_eq!(snapshot["supported_schema"], 17);
+    assert_eq!(snapshot["database_schema"], 9);
+    assert_eq!(snapshot["migration_needed"], true);
+    assert_eq!(snapshot["ready_url"], "http://127.0.0.1:8787/ready");
+}
+
+/// T2: JSON mode preserves the existing exit-code semantics even when the
+/// pre-flight check fails.
+#[test]
+fn check_json_exit_code_matches_text_mode_on_failure() {
+    let environment = PackagingEnvironment::new("check-json-fail");
+    let text_output = environment
+        .command()
+        .env("LOCAL_API_RELAY_TEST_FAIL_CHECK", "1")
+        .arg("check")
+        .output()
+        .unwrap();
+    let json_output = environment
+        .command()
+        .env("LOCAL_API_RELAY_TEST_FAIL_CHECK", "1")
+        .args(["check", "--json"])
+        .output()
+        .unwrap();
+    assert!(!text_output.status.success());
+    assert!(!json_output.status.success());
+    assert_eq!(
+        text_output.status.code(),
+        json_output.status.code(),
+        "JSON mode must exit with the same code as text mode"
+    );
+    let stdout = String::from_utf8(json_output.stdout).unwrap();
+    let snapshot: serde_json::Value =
+        serde_json::from_str(&stdout).expect("failing check --json still prints valid JSON");
+    assert!(
+        snapshot.get("version").is_some(),
+        "failing JSON snapshot still carries fields: {snapshot}"
+    );
+}
+
 /// A repeating upstream that answers every connection with a scripted Chat
 /// Completions success and counts the connections, so a relay's startup probes
 /// and the post-rollback recovery call all succeed during an upgrade drill.

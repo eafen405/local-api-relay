@@ -6,6 +6,7 @@ use crate::{
 };
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
+use serde_json::json;
 
 /// Test hook that makes `check` report a blocking pre-flight failure, so the
 /// "installation verification fails before any switch" drill is deterministic.
@@ -48,7 +49,11 @@ enum Command {
     /// schema, and whether a forward migration is required. Read-only — it
     /// never migrates or writes the database. Exits non-zero on a blocking
     /// condition (newer schema, corrupt database, invalid settings).
-    Check,
+    Check {
+        /// Emit a machine-readable JSON snapshot instead of key/value text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Create a verified managed backup of the live database without running
     /// any migration: the upgrade pre-flight's pre-migration snapshot, which
     /// must exist and verify before the stable entry is switched and which the
@@ -116,10 +121,27 @@ pub async fn run(cli: Cli) -> Result<()> {
             )
             .await
         }
-        Command::Check => {
+        Command::Check { json } => {
             let supported = store::supported_schema();
             let database_path = paths.database_path();
             let database_schema = store::read_live_schema(&database_path)?;
+            let migration_needed = database_schema.is_some_and(|schema| schema < supported);
+            // JSON mode emits the snapshot before reporting a blocking condition,
+            // so machine consumers still receive the same fields on a non-zero
+            // exit while exit-code semantics stay identical to text mode.
+            if json {
+                println!(
+                    "{}",
+                    json!({
+                        "version": displayed_version(),
+                        "port": settings.port,
+                        "supported_schema": supported,
+                        "database_schema": database_schema,
+                        "migration_needed": migration_needed,
+                        "ready_url": format!("http://127.0.0.1:{}/ready", settings.port),
+                    })
+                );
+            }
             if database_path.exists() && database_schema.is_none() {
                 bail!(
                     "SQLite database at {} exists but has no local-api-relay schema; \
@@ -127,15 +149,16 @@ pub async fn run(cli: Cli) -> Result<()> {
                     database_path.display()
                 );
             }
-            let migration_needed = database_schema.is_some_and(|schema| schema < supported);
-            println!("version={}", displayed_version());
-            println!("supported_schema={supported}");
-            println!("port={}", settings.port);
-            match database_schema {
-                Some(schema) => println!("database_schema={schema}"),
-                None => println!("database_schema=none"),
+            if !json {
+                println!("version={}", displayed_version());
+                println!("supported_schema={supported}");
+                println!("port={}", settings.port);
+                match database_schema {
+                    Some(schema) => println!("database_schema={schema}"),
+                    None => println!("database_schema=none"),
+                }
+                println!("migration_needed={migration_needed}");
             }
-            println!("migration_needed={migration_needed}");
             if let Some(schema) = database_schema
                 && schema > supported
             {
