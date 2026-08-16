@@ -24,7 +24,9 @@ type JobHandle = ();
 
 struct AppState {
     sidecar: Mutex<Option<CommandChild>>,
-    job: Mutex<Option<JobHandle>>,
+    /// Kept alive for the app lifetime; dropping it closes the Job Object and
+    /// kills any sidecar processes still associated with it.
+    _job: Mutex<Option<JobHandle>>,
     autostart_item: Mutex<Option<CheckMenuItem<Wry>>>,
 }
 
@@ -209,7 +211,7 @@ fn setup_app(app: &mut tauri::App) -> Result<()> {
 
     app.manage(AppState {
         sidecar: Mutex::new(Some(sidecar)),
-        job: Mutex::new(Some(job)),
+        _job: Mutex::new(Some(job)),
         autostart_item: Mutex::new(Some(autostart_item)),
     });
 
