@@ -27,11 +27,22 @@ pub struct ServiceSettings {
 
 impl AppPaths {
     pub fn discover() -> Result<Self> {
-        Ok(Self {
-            data_dir: xdg_path("XDG_DATA_HOME", ".local/share")?.join(APPLICATION_NAME),
-            config_dir: xdg_path("XDG_CONFIG_HOME", ".config")?.join(APPLICATION_NAME),
-            state_dir: xdg_path("XDG_STATE_HOME", ".local/state")?.join(APPLICATION_NAME),
-        })
+        #[cfg(windows)]
+        {
+            Ok(Self {
+                data_dir: windows_base_dir("LOCALAPPDATA")?.join(APPLICATION_NAME),
+                config_dir: windows_base_dir("APPDATA")?.join(APPLICATION_NAME),
+                state_dir: windows_base_dir("LOCALAPPDATA")?.join(APPLICATION_NAME),
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(Self {
+                data_dir: xdg_path("XDG_DATA_HOME", ".local/share")?.join(APPLICATION_NAME),
+                config_dir: xdg_path("XDG_CONFIG_HOME", ".config")?.join(APPLICATION_NAME),
+                state_dir: xdg_path("XDG_STATE_HOME", ".local/state")?.join(APPLICATION_NAME),
+            })
+        }
     }
 
     pub fn database_path(&self) -> PathBuf {
@@ -75,6 +86,17 @@ pub fn validate_port(port: u16) -> Result<()> {
         bail!("port must be between 1 and 65535");
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn windows_base_dir(variable: &str) -> Result<PathBuf> {
+    let value =
+        env::var_os(variable).with_context(|| format!("{variable} is required on Windows"))?;
+    let path = PathBuf::from(value);
+    if !path.is_absolute() {
+        bail!("{variable} must be an absolute path");
+    }
+    Ok(path)
 }
 
 fn xdg_path(variable: &str, fallback_relative_to_home: &str) -> Result<PathBuf> {

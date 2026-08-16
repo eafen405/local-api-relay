@@ -110,7 +110,7 @@ curl -s http://127.0.0.1:8787/v1/chat/completions -H "Authorization: Bearer $KEY
 ~/.local/bin/local-api-relay-service rollback            # 回滚上次升级
 ```
 
-目录（XDG，全部 owner-only 700）：data `~/.local/share/local-api-relay/`（SQLite + backups 快照，定期清理旧快照）、config `~/.config/local-api-relay/`（`service.json` 可改 `"port"`）、state `~/.local/state/local-api-relay/`（日志：14 天轮转、上限 200MiB）。
+目录（XDG，全部 owner-only 700）：data `~/.local/share/local-api-relay/`（SQLite + backups 快照，定期清理旧快照）、config `~/.config/local-api-relay/`（`service.json` 可改 `"port"`）、state `~/.local/state/local-api-relay/`（日志：14 天轮转、上限 200MiB）。Windows 原生版使用 `%LOCALAPPDATA%\local-api-relay`（数据与状态）和 `%APPDATA%\local-api-relay`（配置），目录位于当前用户配置文件内，保持仅当前用户可访问。
 
 升级：下载新版本 tarball → 解压 → `bash install.sh`（自动 preflight + 迁移备份 + 切换 + 重启；失败可用 `rollback` 还原）。
 
@@ -190,7 +190,7 @@ cargo run -- serve
 
 `init-admin` prints a one-time administrator bootstrap credential. Sign in at `http://127.0.0.1:8787`, then replace that credential before Operations becomes available. The management session is separate from relay access keys, and no relay access key has management permissions.
 
-The service uses `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, and `XDG_STATE_HOME` (or their standard home-directory fallbacks) under `local-api-relay`. It always binds `127.0.0.1`; use `cargo run -- serve --port <port>` for an explicit alternate loopback port.
+The service uses `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, and `XDG_STATE_HOME` (or their standard home-directory fallbacks) under `local-api-relay`. On Windows it uses `%LOCALAPPDATA%\local-api-relay` for data/state and `%APPDATA%\local-api-relay` for configuration. It always binds `127.0.0.1`; use `cargo run -- serve --port <port>` for an explicit alternate loopback port.
 
 ## Relay Calls
 
